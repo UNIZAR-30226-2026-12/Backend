@@ -10,10 +10,10 @@ call npm install
 cd ..
 
 echo Starting Backend...
-start "Reversi Backend" cmd /k "cd backend && python -m uvicorn backend:app --reload"
+start "Reversi Backend" cmd /k "cd backend && python -m uvicorn backend:app --reload --port 8081"
 
 echo Starting Frontend...
-start "Reversi Frontend" cmd /k "cd frontend && npm run dev"
+start "Reversi Frontend" cmd /k "cd frontend && npm run dev -- --port 8080"
 
 echo Done! Servers should be running in new windows.
 pause
