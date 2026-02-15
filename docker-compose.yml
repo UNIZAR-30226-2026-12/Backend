@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: reversi_backend
     restart: always
-    expose:
+    ports:
       - "8081:8000"
 
   frontend:
