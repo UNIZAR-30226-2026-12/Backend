@@ -1,4 +1,6 @@
+# =========================
 # Logs
+# =========================
 logs
 *.log
 npm-debug.log*
@@ -7,15 +9,32 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# =========================
+# Node / Frontend
+# =========================
+node_modules/
+dist/
+dist-ssr/
 *.local
 
-# Editor directories and files
+# =========================
+# Python / Backend
+# =========================
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.requirements_hash    # hash local para dependencias Python
+
+# =========================
+# Node hash
+frontend/.package_hash        # hash local para dependencias Node
+
+# =========================
+# Editor / OS files
+# =========================
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
@@ -23,7 +42,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Antigravity & Environment
-.agent/
-__pycache__/
+# =========================
+# Local scripts / generated
+# =========================
 start.bat
+start.cmd
+start.sh
+.agent/
