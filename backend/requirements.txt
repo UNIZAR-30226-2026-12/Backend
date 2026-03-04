@@ -1,3 +1,7 @@
 fastapi
 uvicorn
 pydantic
+databases[postgresql]
+passlib[bcrypt]
+PyJWT
+python-multipart

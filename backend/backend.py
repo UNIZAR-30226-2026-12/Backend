@@ -1,9 +1,15 @@
 import uuid
 from typing import List, Optional, Literal, Dict, Tuple
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import copy
+from db import database
+from passlib.context import CryptContext
+import jwt
+from jwt.exceptions import InvalidTokenError
+from datetime import datetime, timedelta
 
 app = FastAPI(title="Reversi AI Backend")
 
@@ -15,6 +21,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+
+# --- Configuración Auth ---
+SECRET_KEY = "supersecretkey_reversi" # En prod usar variable de entorno
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 semana
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except InvalidTokenError:
+        raise credentials_exception
+    
+    query = "SELECT * FROM users WHERE username = :username"
+    user = await database.fetch_one(query=query, values={"username": username})
+    if user is None:
+        raise credentials_exception
+    return dict(user)
 
 # --- Tipos y Constantes ---
 Player = Literal['black', 'white']
@@ -40,6 +98,22 @@ DIRECTIONS = [
 ]
 
 # --- Modelos de Datos ---
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    elo: int
+    avatar_url: Optional[str] = None
+    preferred_piece_color: str
+    preferred_board_color: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 class Coordinate(BaseModel):
     row: int
@@ -201,6 +275,61 @@ def resolve_game_state(board: Board, next_player: Player) -> Tuple[bool, Optiona
     return True, winner, None, []
 
 # --- Endpoints API ---
+
+# --- Auth y Usuarios ---
+
+@app.post("/api/auth/register", response_model=UserResponse)
+async def register(user: UserCreate):
+    query = "SELECT * FROM users WHERE username = :username"
+    existing_user = await database.fetch_one(query=query, values={"username": user.username})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    hashed_password = get_password_hash(user.password)
+    query = """
+        INSERT INTO users (username, password_hash)
+        VALUES (:username, :password)
+        RETURNING id, username, elo, avatar_url, preferred_piece_color, preferred_board_color
+    """
+    values = {"username": user.username, "password": hashed_password}
+    return await database.fetch_one(query=query, values=values)
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    query = "SELECT * FROM users WHERE username = :username"
+    user = await database.fetch_one(query=query, values={"username": form_data.username})
+    
+    if not user or not verify_password(form_data.password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    
+    access_token = create_access_token(
+        data={"sub": user["username"]}, 
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/users/me", response_model=UserResponse)
+async def read_users_me(current_user: dict = Depends(get_current_user)):
+    return current_user
+
+@app.get("/api/users/{user_id}/stats")
+async def read_user_stats(user_id: int):
+    query = "SELECT elo, username FROM users WHERE id = :user_id"
+    user = await database.fetch_one(query=query, values={"user_id": user_id})
+    if not user:
+         raise HTTPException(status_code=404, detail="User not found")
+    
+    query_games = "SELECT COUNT(*) as total, SUM(CASE WHEN winner_id = :user_id THEN 1 ELSE 0 END) as wins FROM games WHERE player1_id = :user_id OR player2_id = :user_id"
+    stats = await database.fetch_one(query=query_games, values={"user_id": user_id})
+    
+    return {
+        "username": user["username"],
+        "elo": user["elo"],
+        "total_games": stats["total"] if stats else 0,
+        "wins": stats["wins"] if stats and stats["wins"] else 0
+    }
+
+# --- Partidas (Mock Anterior) ---
 
 @app.post("/partida", response_model=GameStateResponse)
 async def create_game():
