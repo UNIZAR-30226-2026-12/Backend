@@ -82,14 +82,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        user_id: str = payload.get("sub")
+        if user_id is None:
             raise credentials_exception
     except InvalidTokenError:
         raise credentials_exception
     
-    query = "SELECT * FROM users WHERE username = :username"
-    user = await database.fetch_one(query=query, values={"username": username})
+    query = "SELECT * FROM users WHERE id = :uid"
+    user = await database.fetch_one(query=query, values={"uid": int(user_id)})
     if user is None:
         raise credentials_exception
     return dict(user)
@@ -359,7 +359,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=400, detail="Incorrect username or password")
     
     access_token = create_access_token(
-        data={"sub": user["username"]}, 
+        data={"sub": str(user["id"])}, 
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     return {"access_token": access_token, "token_type": "bearer"}
@@ -536,11 +536,7 @@ async def send_friend_request(req: FriendRequest, current_user: dict = Depends(g
 @app.post("/api/friends/{user_id}/accept")
 async def accept_friend_request(user_id: int, current_user: dict = Depends(get_current_user)):
     query = "UPDATE friendships SET status = 'accepted' WHERE user_id = :tid AND friend_id = :uid AND status = 'pending'"
-    result = await database.execute(query=query, values={"uid": current_user["id"], "tid": user_id})
-    
-    if not result:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-        
+    await database.execute(query=query, values={"uid": current_user["id"], "tid": user_id})
     return {"message": "Solicitud aceptada"}
 
 @app.post("/api/friends/{user_id}/reject")
