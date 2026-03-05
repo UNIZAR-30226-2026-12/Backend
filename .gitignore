@@ -48,5 +48,5 @@ frontend/.package_hash        # hash local para dependencias Node
 start.bat
 start.cmd
 start.sh
-.agent/
-/Frontend-Web/
+.agents/
+

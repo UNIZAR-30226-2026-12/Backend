@@ -11,6 +11,26 @@ import jwt
 from jwt.exceptions import InvalidTokenError
 from datetime import datetime, timedelta
 
+"""
+Endpoints del Backend:
+- POST /api/auth/register : Registro de nuevos usuarios
+- POST /api/auth/login : Inicio de sesión (OAuth2)
+- GET  /api/users/me : Obtener datos del perfil actual
+- GET  /api/users/{user_id}/stats : Obtener estadísticas de un usuario
+- PUT  /api/users/me : Actualizar información básica (username, email)
+- PUT  /api/users/customization : Actualizar preferencias estéticas
+- POST /api/users/avatar : Subida de imagen de avatar
+- GET  /api/users/me/history : Historial de partidas del usuario
+- GET  /api/friends : Listar amigos, solicitudes e invitaciones a juegos
+- POST /api/friends/request : Enviar solicitud de amistad
+- POST /api/friends/{user_id}/accept : Aceptar solicitud de amistad
+- POST /api/friends/{user_id}/reject : Rechazar solicitud o eliminar amigo
+- DELETE /api/friends/{user_id} : Eliminar amigo (alias de reject)
+- POST /api/games/invite : Invitar a un amigo a una partida privada
+- POST /partida : (Legacy) Crear partida rápida
+- POST /movimiento : (Legacy) Realizar movimiento en partida
+"""
+
 app = FastAPI(title="Reversi AI Backend")
 
 # Habilitar CORS para permitir peticiones desde el frontend
@@ -153,6 +173,19 @@ class GameHistoryResponse(BaseModel):
     result: str # Ganada, Perdida, Empate
     score: str
     rankChange: str
+
+class FriendResponse(BaseModel):
+    id: int
+    name: str # username
+    status: str # online, offline, playing
+    rr: int # elo
+
+class FriendRequest(BaseModel):
+    username: str
+
+class GameInviteRequest(BaseModel):
+    friend_id: int
+    mode: str # 1vs1, 1vs1vs1vs1
 
 # --- DB en memoria ---
 games_db: Dict[str, GameStateResponse] = {}
@@ -436,6 +469,104 @@ async def get_my_history(current_user: dict = Depends(get_current_user)):
             rankChange="0 RR" # Mock por ahora
         ))
     return history
+
+# --- Sistema Social y Amigos ---
+
+@app.get("/api/friends")
+async def list_friends(current_user: dict = Depends(get_current_user)):
+    # 1. Amigos aceptados
+    query_friends = """
+        SELECT u.id, u.username as name, u.elo as rr 
+        FROM users u
+        JOIN friendships f ON (f.friend_id = u.id AND f.user_id = :uid) OR (f.user_id = u.id AND f.friend_id = :uid)
+        WHERE f.status = 'accepted'
+    """
+    friends_rows = await database.fetch_all(query=query_friends, values={"uid": current_user["id"]})
+    
+    # 2. Solicitudes recibidas pendientes
+    query_requests = """
+        SELECT u.id, u.username as name, u.elo as rr
+        FROM users u
+        JOIN friendships f ON f.user_id = u.id
+        WHERE f.friend_id = :uid AND f.status = 'pending'
+    """
+    requests_rows = await database.fetch_all(query=query_requests, values={"uid": current_user["id"]})
+    
+    # 3. Invitaciones a juegos (de lobbies donde estamos invitados)
+    query_game_invites = """
+        SELECT u.id, u.username as name, u.elo as rr, l.mode as gameMode, l.id as lobby_id
+        FROM users u
+        JOIN lobbies l ON l.creator_id = u.id
+        WHERE l.invited_id = :uid AND l.status = 'waiting'
+    """
+    game_invites_rows = await database.fetch_all(query=query_game_invites, values={"uid": current_user["id"]})
+
+    return {
+        "friends": [
+            {**dict(row), "status": "online"} for row in friends_rows # Mock status online
+        ],
+        "requests": [dict(row) for row in requests_rows],
+        "gameRequests": [dict(row) for row in game_invites_rows]
+    }
+
+@app.post("/api/friends/request")
+async def send_friend_request(req: FriendRequest, current_user: dict = Depends(get_current_user)):
+    # Buscar el usuario por username
+    query_user = "SELECT id FROM users WHERE username = :un"
+    target_user = await database.fetch_one(query=query_user, values={"un": req.username})
+    
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if target_user["id"] == current_user["id"]:
+        raise HTTPException(status_code=400, detail="No puedes enviarte una solicitud a ti mismo")
+    
+    # Verificar si ya existe una relación
+    query_check = "SELECT status FROM friendships WHERE (user_id = :uid AND friend_id = :tid) OR (user_id = :tid AND friend_id = :uid)"
+    existing = await database.fetch_one(query=query_check, values={"uid": current_user["id"], "tid": target_user["id"]})
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Ya existe una relación con este usuario")
+    
+    query_insert = "INSERT INTO friendships (user_id, friend_id, status) VALUES (:uid, :tid, 'pending')"
+    await database.execute(query=query_insert, values={"uid": current_user["id"], "tid": target_user["id"]})
+    
+    return {"message": "Solicitud enviada"}
+
+@app.post("/api/friends/{user_id}/accept")
+async def accept_friend_request(user_id: int, current_user: dict = Depends(get_current_user)):
+    query = "UPDATE friendships SET status = 'accepted' WHERE user_id = :tid AND friend_id = :uid AND status = 'pending'"
+    result = await database.execute(query=query, values={"uid": current_user["id"], "tid": user_id})
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+        
+    return {"message": "Solicitud aceptada"}
+
+@app.post("/api/friends/{user_id}/reject")
+async def reject_friend_request(user_id: int, current_user: dict = Depends(get_current_user)):
+    query = "DELETE FROM friendships WHERE (user_id = :tid AND friend_id = :uid) OR (user_id = :uid AND friend_id = :tid)"
+    await database.execute(query=query, values={"uid": current_user["id"], "tid": user_id})
+    return {"message": "Solicitud/Amigo eliminado"}
+
+@app.delete("/api/friends/{user_id}")
+async def delete_friend(user_id: int, current_user: dict = Depends(get_current_user)):
+    return await reject_friend_request(user_id, current_user)
+
+@app.post("/api/games/invite")
+async def invite_to_game(req: GameInviteRequest, current_user: dict = Depends(get_current_user)):
+    # Crear un lobby privado con invitado
+    query = """
+        INSERT INTO lobbies (creator_id, invited_id, is_public, mode, status)
+        VALUES (:cid, :iid, false, :mode, 'waiting')
+        RETURNING id
+    """
+    lobby_id = await database.execute(query=query, values={
+        "cid": current_user["id"],
+        "iid": req.friend_id,
+        "mode": req.mode
+    })
+    return {"lobby_id": lobby_id}
 
 # --- Partidas (Mock Anterior) ---
 

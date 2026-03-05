@@ -46,6 +46,7 @@ EXECUTE FUNCTION update_modified_column();
 CREATE TABLE lobbies (
     id SERIAL PRIMARY KEY,
     creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    invited_id INTEGER REFERENCES users(id) ON DELETE SET NULL, -- Para retos directos entre amigos
     is_public BOOLEAN NOT NULL DEFAULT true,
     mode VARCHAR(50) NOT NULL DEFAULT '1vs1', -- 1vs1, 1vs1vs1vs1
     status VARCHAR(20) NOT NULL DEFAULT 'waiting', -- waiting, in_game, finished
