@@ -17,7 +17,7 @@ app = FastAPI(title="Reversi AI Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -101,11 +101,13 @@ DIRECTIONS = [
 
 class UserCreate(BaseModel):
     username: str
+    email: str
     password: str
 
 class UserResponse(BaseModel):
     id: int
     username: str
+    email: str
     elo: int
     avatar_url: Optional[str] = None
     preferred_piece_color: str
@@ -280,19 +282,23 @@ def resolve_game_state(board: Board, next_player: Player) -> Tuple[bool, Optiona
 
 @app.post("/api/auth/register", response_model=UserResponse)
 async def register(user: UserCreate):
-    query = "SELECT * FROM users WHERE username = :username"
-    existing_user = await database.fetch_one(query=query, values={"username": user.username})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    hashed_password = get_password_hash(user.password)
-    query = """
-        INSERT INTO users (username, password_hash)
-        VALUES (:username, :password)
-        RETURNING id, username, elo, avatar_url, preferred_piece_color, preferred_board_color
-    """
-    values = {"username": user.username, "password": hashed_password}
-    return await database.fetch_one(query=query, values=values)
+    try:
+        query = "SELECT * FROM users WHERE username = :un"
+        existing_user = await database.fetch_one(query=query, values={"un": user.username})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username already registered")
+        
+        hashed_password = get_password_hash(user.password)
+        query = "INSERT INTO users (username, email, password_hash) VALUES (:un, :em, :pw)"
+        await database.execute(query=query, values={"un": user.username, "em": user.email, "pw": hashed_password})
+        
+        query = "SELECT id, username, email, elo, avatar_url, preferred_piece_color, preferred_board_color FROM users WHERE username = :un"
+        return await database.fetch_one(query=query, values={"un": user.username})
+    except Exception as e:
+        print(f"DEBUG REGISTER ERROR: {str(e)}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):

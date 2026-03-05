@@ -8,8 +8,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código del backend
-COPY backend.py .
+# Copiar el código del backend y la conexión a la DB
+COPY . .
 
 # Exponer el puerto en el que correrá uvicorn (interno del contenedor)
 EXPOSE 8000
