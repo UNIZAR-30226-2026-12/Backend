@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional, Literal, Dict, Tuple
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -136,6 +136,23 @@ class MoveRequest(BaseModel):
     row: int
     col: int
     player: Player
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+
+class CustomizationUpdate(BaseModel):
+    avatar_url: Optional[str] = None
+    preferred_piece_color: Optional[str] = None
+    preferred_board_color: Optional[str] = None
+
+class GameHistoryResponse(BaseModel):
+    id: int
+    date: str
+    mode: str
+    result: str # Ganada, Perdida, Empate
+    score: str
+    rankChange: str
 
 # --- DB en memoria ---
 games_db: Dict[str, GameStateResponse] = {}
@@ -334,6 +351,91 @@ async def read_user_stats(user_id: int):
         "total_games": stats["total"] if stats else 0,
         "wins": stats["wins"] if stats and stats["wins"] else 0
     }
+
+@app.put("/api/users/me", response_model=UserResponse)
+async def update_user_me(update: UserUpdate, current_user: dict = Depends(get_current_user)):
+    values = {}
+    if update.username:
+        # Check if username exists
+        query_check = "SELECT id FROM users WHERE username = :un AND id != :uid"
+        existing = await database.fetch_one(query=query_check, values={"un": update.username, "uid": current_user["id"]})
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        values["un"] = update.username
+    else:
+        values["un"] = current_user["username"]
+    
+    if update.email:
+        values["em"] = update.email
+    else:
+        values["em"] = current_user["email"]
+    
+    query = "UPDATE users SET username = :un, email = :em WHERE id = :uid"
+    await database.execute(query=query, values={**values, "uid": current_user["id"]})
+    
+    updated_user = await database.fetch_one(query="SELECT * FROM users WHERE id = :uid", values={"uid": current_user["id"]})
+    return dict(updated_user)
+
+@app.put("/api/users/customization", response_model=UserResponse)
+async def update_customization(update: CustomizationUpdate, current_user: dict = Depends(get_current_user)):
+    updates = []
+    values = {"uid": current_user["id"]}
+    
+    if update.avatar_url is not None:
+        updates.append("avatar_url = :avatar")
+        values["avatar"] = update.avatar_url
+    if update.preferred_piece_color is not None:
+        updates.append("preferred_piece_color = :piece")
+        values["piece"] = update.preferred_piece_color
+    if update.preferred_board_color is not None:
+        updates.append("preferred_board_color = :board")
+        values["board"] = update.preferred_board_color
+        
+    if not updates:
+        return current_user
+        
+    query = f"UPDATE users SET {', '.join(updates)} WHERE id = :uid"
+    await database.execute(query=query, values=values)
+    
+    updated_user = await database.fetch_one(query="SELECT * FROM users WHERE id = :uid", values={"uid": current_user["id"]})
+    return dict(updated_user)
+
+@app.post("/api/users/avatar")
+async def upload_avatar(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    # En un entorno real, guardaríamos el archivo en S3 o disco.
+    # Por ahora simulamos guardando el nombre y actualizando la DB.
+    file_location = f"avatars/{current_user['id']}_{file.filename}"
+    # await database.execute(...)
+    return {"avatar_url": file_location}
+
+@app.get("/api/users/me/history", response_model=List[GameHistoryResponse])
+async def get_my_history(current_user: dict = Depends(get_current_user)):
+    query = """
+        SELECT id, created_at, mode, winner_id,
+        (SELECT COUNT(*) FROM moves WHERE game_id = games.id AND player_id = :uid) as my_moves
+        FROM games 
+        WHERE player1_id = :uid OR player2_id = :uid OR player3_id = :uid OR player4_id = :uid
+        ORDER BY created_at DESC
+    """
+    rows = await database.fetch_all(query=query, values={"uid": current_user["id"]})
+    
+    history = []
+    for row in rows:
+        result = "Empate"
+        if row["winner_id"] == current_user["id"]:
+            result = "Ganada"
+        elif row["winner_id"] is not None:
+            result = "Perdida"
+            
+        history.append(GameHistoryResponse(
+            id=row["id"],
+            date=row["created_at"].strftime("%Y-%m-%d"),
+            mode=row["mode"],
+            result=result,
+            score="N/A", # En un futuro se puede calcular de la tabla de movimientos
+            rankChange="0 RR" # Mock por ahora
+        ))
+    return history
 
 # --- Partidas (Mock Anterior) ---
 
