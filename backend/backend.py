@@ -1,8 +1,10 @@
 import uuid
+import os
 from typing import List, Optional, Literal, Dict, Tuple
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import copy
 from db import database
@@ -32,6 +34,13 @@ Endpoints del Backend:
 """
 
 app = FastAPI(title="Reversi AI Backend")
+
+# --- Configuracion de Archivos ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+AVATARS_UPLOADS_DIR = os.path.join(UPLOADS_DIR, "avatars")
+os.makedirs(AVATARS_UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # Habilitar CORS para permitir peticiones desde el frontend
 app.add_middleware(
@@ -74,10 +83,22 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+def save_user_avatar_file(user_id: int, file: UploadFile) -> Tuple[str, str]:
+    allowed_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    _, extension = os.path.splitext(file.filename or "")
+    extension = extension.lower()
+    if extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Formato de archivo no permitido")
+
+    file_name = f"{user_id}_{uuid.uuid4().hex}{extension}"
+    file_path = os.path.join(AVATARS_UPLOADS_DIR, file_name)
+    public_path = f"/uploads/avatars/{file_name}"
+    return file_path, public_path
+
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=401,
-        detail="Could not validate credentials",
+        detail="No se pudieron validar las credenciales",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -333,30 +354,39 @@ def resolve_game_state(board: Board, next_player: Player) -> Tuple[bool, Optiona
 @app.post("/api/auth/register", response_model=UserResponse)
 async def register(user: UserCreate):
     try:
+        username = user.username.strip()
+        email = user.email.strip()
+        if not username:
+            raise HTTPException(status_code=400, detail="El nombre de usuario no puede estar vacío")
+
         query = "SELECT * FROM users WHERE username = :un"
-        existing_user = await database.fetch_one(query=query, values={"un": user.username})
+        existing_user = await database.fetch_one(query=query, values={"un": username})
         if existing_user:
-            raise HTTPException(status_code=400, detail="Username already registered")
+            raise HTTPException(status_code=400, detail="Este nombre de usuario ya está registrado")
         
         hashed_password = get_password_hash(user.password)
         query = "INSERT INTO users (username, email, password_hash) VALUES (:un, :em, :pw)"
-        await database.execute(query=query, values={"un": user.username, "em": user.email, "pw": hashed_password})
+        await database.execute(query=query, values={"un": username, "em": email, "pw": hashed_password})
         
         query = "SELECT id, username, email, elo, avatar_url, preferred_piece_color, preferred_board_color FROM users WHERE username = :un"
-        return await database.fetch_one(query=query, values={"un": user.username})
+        return await database.fetch_one(query=query, values={"un": username})
     except Exception as e:
         print(f"DEBUG REGISTER ERROR: {str(e)}")
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al registrar: {str(e)}")
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    username = form_data.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Nombre de usuario o contraseña incorrectos")
+
     query = "SELECT * FROM users WHERE username = :username"
-    user = await database.fetch_one(query=query, values={"username": form_data.username})
+    user = await database.fetch_one(query=query, values={"username": username})
     
     if not user or not verify_password(form_data.password, user["password_hash"]):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
+        raise HTTPException(status_code=400, detail="Nombre de usuario o contraseña incorrectos")
     
     access_token = create_access_token(
         data={"sub": str(user["id"])}, 
@@ -373,7 +403,7 @@ async def read_user_stats(user_id: int):
     query = "SELECT elo, username FROM users WHERE id = :user_id"
     user = await database.fetch_one(query=query, values={"user_id": user_id})
     if not user:
-         raise HTTPException(status_code=404, detail="User not found")
+         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
     query_games = "SELECT COUNT(*) as total, SUM(CASE WHEN winner_id = :user_id THEN 1 ELSE 0 END) as wins FROM games WHERE player1_id = :user_id OR player2_id = :user_id"
     stats = await database.fetch_one(query=query_games, values={"user_id": user_id})
@@ -388,18 +418,25 @@ async def read_user_stats(user_id: int):
 @app.put("/api/users/me", response_model=UserResponse)
 async def update_user_me(update: UserUpdate, current_user: dict = Depends(get_current_user)):
     values = {}
-    if update.username:
+    if update.username is not None:
+        normalized_username = update.username.strip()
+        if not normalized_username:
+            raise HTTPException(status_code=400, detail="El nombre de usuario no puede estar vacío")
+
         # Check if username exists
         query_check = "SELECT id FROM users WHERE username = :un AND id != :uid"
-        existing = await database.fetch_one(query=query_check, values={"un": update.username, "uid": current_user["id"]})
+        existing = await database.fetch_one(query=query_check, values={"un": normalized_username, "uid": current_user["id"]})
         if existing:
-            raise HTTPException(status_code=400, detail="Username already taken")
-        values["un"] = update.username
+            raise HTTPException(status_code=400, detail="Este nombre de usuario ya está registrado")
+        values["un"] = normalized_username
     else:
         values["un"] = current_user["username"]
     
-    if update.email:
-        values["em"] = update.email
+    if update.email is not None:
+        normalized_email = update.email.strip()
+        if not normalized_email:
+            raise HTTPException(status_code=400, detail="El correo electrónico no puede estar vacío")
+        values["em"] = normalized_email
     else:
         values["em"] = current_user["email"]
     
@@ -434,12 +471,21 @@ async def update_customization(update: CustomizationUpdate, current_user: dict =
     return dict(updated_user)
 
 @app.post("/api/users/avatar")
-async def upload_avatar(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    # En un entorno real, guardaríamos el archivo en S3 o disco.
-    # Por ahora simulamos guardando el nombre y actualizando la DB.
-    file_location = f"avatars/{current_user['id']}_{file.filename}"
-    # await database.execute(...)
-    return {"avatar_url": file_location}
+async def upload_avatar(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    file_path, public_path = save_user_avatar_file(current_user["id"], file)
+    content = await file.read()
+
+    with open(file_path, "wb") as avatar_file:
+        avatar_file.write(content)
+
+    avatar_url = f"{str(request.base_url).rstrip('/')}{public_path}"
+    query_update = "UPDATE users SET avatar_url = :avatar WHERE id = :uid"
+    await database.execute(query=query_update, values={"avatar": avatar_url, "uid": current_user["id"]})
+    return {"avatar_url": avatar_url}
 
 @app.get("/api/users/me/history", response_model=List[GameHistoryResponse])
 async def get_my_history(current_user: dict = Depends(get_current_user)):
@@ -476,7 +522,7 @@ async def get_my_history(current_user: dict = Depends(get_current_user)):
 async def list_friends(current_user: dict = Depends(get_current_user)):
     # 1. Amigos aceptados
     query_friends = """
-        SELECT u.id, u.username as name, u.elo as rr 
+        SELECT u.id, u.username as name, u.elo as rr, u.avatar_url as avatar_url
         FROM users u
         JOIN friendships f ON (f.friend_id = u.id AND f.user_id = :uid) OR (f.user_id = u.id AND f.friend_id = :uid)
         WHERE f.status = 'accepted'
@@ -485,7 +531,7 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     
     # 2. Solicitudes recibidas pendientes
     query_requests = """
-        SELECT u.id, u.username as name, u.elo as rr
+        SELECT u.id, u.username as name, u.elo as rr, u.avatar_url as avatar_url
         FROM users u
         JOIN friendships f ON f.user_id = u.id
         WHERE f.friend_id = :uid AND f.status = 'pending'
@@ -494,7 +540,7 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     
     # 3. Invitaciones a juegos (de lobbies donde estamos invitados)
     query_game_invites = """
-        SELECT u.id, u.username as name, u.elo as rr, l.mode as gameMode, l.id as lobby_id
+        SELECT u.id, u.username as name, u.elo as rr, u.avatar_url as avatar_url, l.mode as gameMode, l.id as lobby_id
         FROM users u
         JOIN lobbies l ON l.creator_id = u.id
         WHERE l.invited_id = :uid AND l.status = 'waiting'
