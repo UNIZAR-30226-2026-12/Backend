@@ -359,10 +359,13 @@ async def register(user: UserCreate):
         if not username:
             raise HTTPException(status_code=400, detail="El nombre de usuario no puede estar vacío")
 
-        query = "SELECT * FROM users WHERE username = :un"
-        existing_user = await database.fetch_one(query=query, values={"un": username})
+        query = "SELECT * FROM users WHERE username = :un OR email = :em"
+        existing_user = await database.fetch_one(query=query, values={"un": username, "em": email})
         if existing_user:
-            raise HTTPException(status_code=400, detail="Este nombre de usuario ya está registrado")
+            if existing_user["username"] == username:
+                raise HTTPException(status_code=400, detail="Este nombre de usuario ya está registrado")
+            if existing_user["email"] == email:
+                raise HTTPException(status_code=400, detail="Este correo electrónico ya está registrado")
         
         hashed_password = get_password_hash(user.password)
         query = "INSERT INTO users (username, email, password_hash) VALUES (:un, :em, :pw)"
@@ -574,6 +577,12 @@ async def send_friend_request(req: FriendRequest, current_user: dict = Depends(g
     if existing:
         raise HTTPException(status_code=400, detail="Ya existe una relación con este usuario")
     
+    # Verificar si ha sido rechazado demasiadas veces (límite de 3)
+    query_rejections = "SELECT rejection_count FROM friend_request_rejections WHERE sender_id = :uid AND receiver_id = :tid"
+    rejection = await database.fetch_one(query=query_rejections, values={"uid": current_user["id"], "tid": target_user["id"]})
+    if rejection and rejection["rejection_count"] >= 3:
+        raise HTTPException(status_code=403, detail="No puedes enviar más solicitudes a este usuario, has sido rechazado demasiadas veces.")
+    
     query_insert = "INSERT INTO friendships (user_id, friend_id, status) VALUES (:uid, :tid, 'pending')"
     await database.execute(query=query_insert, values={"uid": current_user["id"], "tid": target_user["id"]})
     
@@ -587,6 +596,20 @@ async def accept_friend_request(user_id: int, current_user: dict = Depends(get_c
 
 @app.post("/api/friends/{user_id}/reject")
 async def reject_friend_request(user_id: int, current_user: dict = Depends(get_current_user)):
+    # Comprobar si era una solicitud pendiente para registrar el rechazo
+    query_check = "SELECT status FROM friendships WHERE user_id = :tid AND friend_id = :uid"
+    existing = await database.fetch_one(query=query_check, values={"uid": current_user["id"], "tid": user_id})
+    
+    if existing and existing["status"] == 'pending':
+        # Es un rechazo de solicitud pendiente: sumar 1 al contador
+        query_upsert = """
+            INSERT INTO friend_request_rejections (sender_id, receiver_id, rejection_count)
+            VALUES (:sender, :receiver, 1)
+            ON CONFLICT (sender_id, receiver_id) 
+            DO UPDATE SET rejection_count = friend_request_rejections.rejection_count + 1
+        """
+        await database.execute(query=query_upsert, values={"sender": user_id, "receiver": current_user["id"]})
+
     query = "DELETE FROM friendships WHERE (user_id = :tid AND friend_id = :uid) OR (user_id = :uid AND friend_id = :tid)"
     await database.execute(query=query, values={"uid": current_user["id"], "tid": user_id})
     return {"message": "Solicitud/Amigo eliminado"}

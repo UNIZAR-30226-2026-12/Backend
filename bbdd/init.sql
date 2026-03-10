@@ -84,3 +84,12 @@ CREATE TABLE moves (
     col_idx INTEGER NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Tabla para registrar el número de veces que un usuario rechaza la petición de otro
+CREATE TABLE friend_request_rejections (
+    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rejection_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (sender_id, receiver_id)
+);
+
