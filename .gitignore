@@ -20,7 +20,7 @@ dist-ssr/
 # =========================
 # Python / Backend
 # =========================
-backend/.venv/
+backend/venv/
 backend/__pycache__/
 backend/*.pyc
 backend/.requirements_hash    # hash local para dependencias Python
