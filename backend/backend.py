@@ -7,10 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import copy
-from db import database
-from passlib.context import CryptContext
-import jwt
-from jwt.exceptions import InvalidTokenError
+from persistence.database import database
+from auth.routes import router as auth_router
+from auth.dependencies import get_current_user
+from auth.schemas import UserResponse
 from datetime import datetime, timedelta
 
 """
@@ -51,6 +51,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
+
 @app.on_event("startup")
 async def startup():
     await database.connect()
@@ -58,30 +60,6 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
-
-# --- Configuración Auth ---
-SECRET_KEY = "supersecretkey_reversi" # En prod usar variable de entorno
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 semana
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
 
 def save_user_avatar_file(user_id: int, file: UploadFile) -> Tuple[str, str]:
     allowed_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -94,26 +72,6 @@ def save_user_avatar_file(user_id: int, file: UploadFile) -> Tuple[str, str]:
     file_path = os.path.join(AVATARS_UPLOADS_DIR, file_name)
     public_path = f"/uploads/avatars/{file_name}"
     return file_path, public_path
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="No se pudieron validar las credenciales",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except InvalidTokenError:
-        raise credentials_exception
-    
-    query = "SELECT * FROM users WHERE id = :uid"
-    user = await database.fetch_one(query=query, values={"uid": int(user_id)})
-    if user is None:
-        raise credentials_exception
-    return dict(user)
 
 # --- Tipos y Constantes ---
 Player = Literal['black', 'white']
@@ -137,26 +95,6 @@ DIRECTIONS = [
     (0, -1),           (0, 1),
     (1, -1),  (1, 0),  (1, 1)
 ]
-
-# --- Modelos de Datos ---
-
-class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
-
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    email: str
-    elo: int
-    avatar_url: Optional[str] = None
-    preferred_piece_color: str
-    preferred_board_color: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
 
 class Coordinate(BaseModel):
     row: int
@@ -350,53 +288,6 @@ def resolve_game_state(board: Board, next_player: Player) -> Tuple[bool, Optiona
 # --- Endpoints API ---
 
 # --- Auth y Usuarios ---
-
-@app.post("/api/auth/register", response_model=UserResponse)
-async def register(user: UserCreate):
-    try:
-        username = user.username.strip()
-        email = user.email.strip()
-        if not username:
-            raise HTTPException(status_code=400, detail="El nombre de usuario no puede estar vacío")
-
-        query = "SELECT * FROM users WHERE username = :un OR email = :em"
-        existing_user = await database.fetch_one(query=query, values={"un": username, "em": email})
-        if existing_user:
-            if existing_user["username"] == username:
-                raise HTTPException(status_code=400, detail="Este nombre de usuario ya está registrado")
-            if existing_user["email"] == email:
-                raise HTTPException(status_code=400, detail="Este correo electrónico ya está registrado")
-        
-        hashed_password = get_password_hash(user.password)
-        query = "INSERT INTO users (username, email, password_hash) VALUES (:un, :em, :pw)"
-        await database.execute(query=query, values={"un": username, "em": email, "pw": hashed_password})
-        
-        query = "SELECT id, username, email, elo, avatar_url, preferred_piece_color, preferred_board_color FROM users WHERE username = :un"
-        return await database.fetch_one(query=query, values={"un": username})
-    except Exception as e:
-        print(f"DEBUG REGISTER ERROR: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=f"Error al registrar: {str(e)}")
-
-@app.post("/api/auth/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    username = form_data.username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="Nombre de usuario o contraseña incorrectos")
-
-    query = "SELECT * FROM users WHERE username = :username"
-    user = await database.fetch_one(query=query, values={"username": username})
-    
-    if not user or not verify_password(form_data.password, user["password_hash"]):
-        raise HTTPException(status_code=400, detail="Nombre de usuario o contraseña incorrectos")
-    
-    access_token = create_access_token(
-        data={"sub": str(user["id"])}, 
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
 @app.get("/api/users/me", response_model=UserResponse)
 async def read_users_me(current_user: dict = Depends(get_current_user)):
     return current_user
