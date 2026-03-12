@@ -4,7 +4,7 @@ from typing import Optional
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
 
-SECRET_KEY = "supersecretkey_reversi" # En prod usar variable de entorno
+SECRET_KEY = "supersecretkey_reversi" # En prod usar variable de entorno, hay que buscar una de 32 b
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 semana
 

@@ -7,10 +7,10 @@ from fastapi.staticfiles import StaticFiles
 from auth.routes import router as auth_router
 from avatar.routes import router as avatar_router
 from friends.routes import router as friends_router
-from game.routes import router as game_router
 from lobby.routes import router as lobby_router
 from persistence.database import database
 from users.routes import router as users_router
+from ws.routes import router as ws_router
 
 """
 Endpoints del Backend:
@@ -54,9 +54,9 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(avatar_router, prefix="/api/users", tags=["Avatar"])
 app.include_router(friends_router, prefix="/api/friends", tags=["Friends"])
-app.include_router(game_router, tags=["Game (Legacy)"])
 app.include_router(lobby_router, prefix="/api/games", tags=["Games/Lobby"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
+app.include_router(ws_router, prefix="/ws", tags=["WebSockets"])
 
 # --- Eventos de Base de Datos ---
 @app.on_event("startup")

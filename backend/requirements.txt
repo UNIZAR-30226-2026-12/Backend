@@ -6,3 +6,4 @@ passlib[bcrypt]
 bcrypt==3.2.0
 PyJWT
 python-multipart
+websockets
