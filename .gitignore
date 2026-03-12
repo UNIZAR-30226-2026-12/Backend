@@ -20,6 +20,7 @@ dist-ssr/
 # =========================
 # Python / Backend
 # =========================
+__pycache__/
 backend/venv/
 backend/__pycache__/
 backend/*.pyc
