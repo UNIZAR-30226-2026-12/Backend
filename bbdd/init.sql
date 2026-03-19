@@ -74,6 +74,18 @@ BEFORE UPDATE ON games
 FOR EACH ROW
 EXECUTE FUNCTION update_modified_column();
 
+-- Historial persistente de partidas por usuario
+CREATE TABLE game_history (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    opponent_name VARCHAR(50) NOT NULL,
+    mode VARCHAR(50) NOT NULL DEFAULT '1vs1',
+    result VARCHAR(20) NOT NULL,
+    score VARCHAR(50) NOT NULL DEFAULT 'N/A',
+    rank_change VARCHAR(20) NOT NULL DEFAULT '0 RR',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Tabla de Movimientos
 CREATE TABLE moves (
     id SERIAL PRIMARY KEY,

@@ -3,7 +3,13 @@ from typing import List
 from persistence.database import database
 from auth.dependencies import get_current_user
 from auth.schemas import UserResponse
-from users.schemas import UserUpdate, CustomizationUpdate, GameHistoryResponse
+from users.schemas import (
+    UserUpdate,
+    CustomizationUpdate,
+    EloUpdate,
+    GameHistoryCreate,
+    GameHistoryResponse,
+)
 
 router = APIRouter()
 
@@ -82,31 +88,66 @@ async def update_customization(update: CustomizationUpdate, current_user: dict =
     updated_user = await database.fetch_one(query="SELECT * FROM users WHERE id = :uid", values={"uid": current_user["id"]})
     return dict(updated_user)
 
+@router.put("/me/elo", response_model=UserResponse)
+async def update_my_elo(update: EloUpdate, current_user: dict = Depends(get_current_user)):
+    query = "UPDATE users SET elo = :elo WHERE id = :uid"
+    await database.execute(query=query, values={"elo": update.elo, "uid": current_user["id"]})
+
+    updated_user = await database.fetch_one(
+        query="SELECT * FROM users WHERE id = :uid",
+        values={"uid": current_user["id"]},
+    )
+    return dict(updated_user)
+
+@router.post("/me/history", response_model=GameHistoryResponse)
+async def create_my_history_entry(
+    entry: GameHistoryCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    query = """
+        INSERT INTO game_history (user_id, opponent_name, mode, result, score, rank_change)
+        VALUES (:user_id, :opponent_name, :mode, :result, :score, :rank_change)
+        RETURNING id, created_at, mode, result, score, rank_change
+    """
+    row = await database.fetch_one(
+        query=query,
+        values={
+            "user_id": current_user["id"],
+            "opponent_name": entry.opponent_name.strip(),
+            "mode": entry.mode,
+            "result": entry.result,
+            "score": entry.score,
+            "rank_change": entry.rankChange,
+        },
+    )
+
+    return GameHistoryResponse(
+        id=row["id"],
+        date=row["created_at"].strftime("%Y-%m-%d"),
+        mode=row["mode"],
+        result=row["result"],
+        score=row["score"],
+        rankChange=row["rank_change"],
+    )
+
 @router.get("/me/history", response_model=List[GameHistoryResponse])
 async def get_my_history(current_user: dict = Depends(get_current_user)):
     query = """
-        SELECT id, created_at, mode, winner_id,
-        (SELECT COUNT(*) FROM moves WHERE game_id = games.id AND player_id = :uid) as my_moves
-        FROM games 
-        WHERE player1_id = :uid OR player2_id = :uid OR player3_id = :uid OR player4_id = :uid
+        SELECT id, created_at, mode, result, score, rank_change
+        FROM game_history
+        WHERE user_id = :uid
         ORDER BY created_at DESC
     """
     rows = await database.fetch_all(query=query, values={"uid": current_user["id"]})
-    
+
     history = []
     for row in rows:
-        result = "Empate"
-        if row["winner_id"] == current_user["id"]:
-            result = "Ganada"
-        elif row["winner_id"] is not None:
-            result = "Perdida"
-            
         history.append(GameHistoryResponse(
             id=row["id"],
             date=row["created_at"].strftime("%Y-%m-%d"),
             mode=row["mode"],
-            result=result,
-            score="N/A", 
-            rankChange="0 RR" 
+            result=row["result"],
+            score=row["score"],
+            rankChange=row["rank_change"],
         ))
     return history

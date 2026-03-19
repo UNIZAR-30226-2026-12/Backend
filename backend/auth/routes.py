@@ -24,8 +24,8 @@ async def register(user: UserCreate):
                 raise HTTPException(status_code=400, detail="Este correo electrónico ya está registrado")
         
         hashed_password = get_password_hash(user.password)
-        query = "INSERT INTO users (username, email, password_hash) VALUES (:un, :em, :pw)"
-        await database.execute(query=query, values={"un": username, "em": email, "pw": hashed_password})
+        query = "INSERT INTO users (username, email, password_hash, elo) VALUES (:un, :em, :pw, :elo)"
+        await database.execute(query=query, values={"un": username, "em": email, "pw": hashed_password, "elo": 1000})
         
         query = "SELECT id, username, email, elo, avatar_url, preferred_piece_color, preferred_board_color FROM users WHERE username = :un"
         return await database.fetch_one(query=query, values={"un": username})

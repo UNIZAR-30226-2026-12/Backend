@@ -10,6 +10,16 @@ class CustomizationUpdate(BaseModel):
     preferred_piece_color: Optional[str] = None
     preferred_board_color: Optional[str] = None
 
+class EloUpdate(BaseModel):
+    elo: int
+
+class GameHistoryCreate(BaseModel):
+    opponent_name: str
+    mode: str
+    result: str
+    score: str
+    rankChange: str
+
 class GameHistoryResponse(BaseModel):
     id: int
     date: str
