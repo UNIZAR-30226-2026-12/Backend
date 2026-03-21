@@ -28,8 +28,8 @@ Endpoints del Backend:
 - POST /api/friends/{user_id}/reject : Rechazar solicitud o eliminar amigo
 - DELETE /api/friends/{user_id} : Eliminar amigo (alias de reject)
 - POST /api/games/invite : Invitar a un amigo a una partida privada
-- POST /partida : (Legacy) Crear partida rápida
-- POST /movimiento : (Legacy) Realizar movimiento en partida
+- POST /partida : Crear partida rápida
+- POST /movimiento : Realizar movimiento en partida
 """
 
 app = FastAPI(title="Reversi AI Backend")

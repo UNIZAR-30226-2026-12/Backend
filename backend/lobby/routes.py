@@ -1,65 +1,57 @@
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+import uuid
+from fastapi import APIRouter, Depends, HTTPException
 from auth.dependencies import get_current_user
 from game.manager import game_manager
-from ws.manager import manager
-from ws.notifications import notifier
+from persistence.database import database
 
 router = APIRouter()
 
-class GameInviteRequest(BaseModel):
-    friend_username: str
-
 @router.post("/create")
 async def create_public_lobby(current_user: dict = Depends(get_current_user)):
-    """El creador pide abrir una sala. Se le devuelve el ID para que se conecte."""
-    game_id = game_manager.create_game(creator_name=current_user["username"])
+    """El creador pide abrir una sala pública online."""
+    query = "INSERT INTO lobbies (creator_id, is_public, status) VALUES (:creator_id, true, 'waiting') RETURNING id"
+    lobby_id = await database.execute(query=query, values={"creator_id": current_user["id"]})
+    game_id = str(lobby_id)
+    
+    game_manager.create_game(creator_name=current_user["username"], game_id=game_id)
     return {"game_id": game_id, "creator": current_user["username"]}
 
 @router.get("/public")
 async def get_public_lobbies():
-    """El Jugador 2 llama a esto para ver qué salas hay abiertas."""
-    return {"lobbies": game_manager.get_waiting_lobbies()}
-
-@router.post("/invite")
-async def invite_friend(req: GameInviteRequest, current_user: dict = Depends(get_current_user)):
-    game_id = game_manager.create_game(creator_name=current_user["username"], is_private=True)
+    """El Jugador 2 llama a esto para ver qué salas existen."""
+    query = """
+        SELECT l.id as game_id, u.username as creator 
+        FROM lobbies l 
+        JOIN users u ON l.creator_id = u.id 
+        WHERE l.status = 'waiting' AND l.is_public = true
+    """
+    rows = await database.fetch_all(query=query)
     
-    enviado = await notifier.send_invite(
-        target_username=req.friend_username, 
-        creator=current_user["username"], 
-        game_id=game_id
-    )
-    
-    if not enviado:
-        return {
-            "game_id": game_id, 
-            "status": "pending", 
-            "message": f"Sala creada, pero {req.friend_username} no está conectado."
-        }
+    lobbies = []
+    for r in rows:
+        g_id = str(r["game_id"])
+        # Si el server crasheó, reinicializar sala en memoria
+        if g_id not in game_manager.active_games:
+            game_manager.create_game(creator_name=r["creator"], is_private=False, game_id=g_id)
+        lobbies.append({"game_id": g_id, "creator": r["creator"]})
         
-    return {
-        "game_id": game_id, 
-        "status": "sent", 
-        "message": f"Invitación enviada a {req.friend_username}."
-    }
+    return {"lobbies": lobbies}
 
-@router.post("/invite/accept")
-async def accept_duel(req: GameInviteRequest, current_user: dict = Depends(get_current_user)):
-    for g_id, game in game_manager.active_games.items():
-        if game["creator"] == req.friend_username and game["status"] == "private":
-            return {"status": "success", "game_id": g_id}
-    raise HTTPException(status_code=404, detail="La invitación ha expirado.")
+@router.post("/join/{game_id}")
+async def join_public_lobby(game_id: str, current_user: dict = Depends(get_current_user)):
+    """El Jugador 2 se une a una sala pública existente."""
+    query = """
+        UPDATE lobbies 
+        SET status = 'playing'
+        WHERE id = :id AND status = 'waiting' AND is_public = true
+        RETURNING id, creator_id
+    """
+    lobby = await database.fetch_one(query=query, values={"id": int(game_id)})
+    
+    if not lobby:
+        raise HTTPException(status_code=400, detail="La sala ya está llena o no existe.")
 
-@router.post("/invite/reject")
-async def reject_duel(req: GameInviteRequest, current_user: dict = Depends(get_current_user)):
-    for g_id, game in game_manager.active_games.items():
-        if game["creator"] == req.friend_username and game["status"] == "private":
-            # Si el creador está esperando en el WS de la partida, le avisamos del rechazo
-            await manager.broadcast_game_state(g_id, {
-                "type": "invite_rejected",
-                "payload": {"message": f"{current_user['username']} ha rechazado el duelo."}
-            })
-            del game_manager.active_games[g_id] # Borramos la sala
-            return {"status": "success", "message": "Duelo rechazado."}
-    return {"status": "error", "message": "Invitación no encontrada."}
+    # Marcamos la sala como "en juego" en la memoria RAM
+    game_manager.set_game_playing(game_id)
+    
+    return {"status": "success", "game_id": game_id, "message": "Te has unido a la partida"}
