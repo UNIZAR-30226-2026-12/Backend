@@ -39,7 +39,6 @@ class GameManager:
     def get_game_state(self, game_id: str) -> dict:
         return self.active_games.get(game_id)
 
-    # AQUÍ ESTÁ LA MAGIA: Una función rápida, sin llamadas a la base de datos
     async def make_move(self, game_id: str, player: Player, row: int, col: int) -> tuple[bool, str]:
         game = self.active_games.get(game_id)
         if not game: return False, "Partida no encontrada"

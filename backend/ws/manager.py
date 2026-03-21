@@ -3,7 +3,6 @@ from typing import Dict, List
 
 class ConnectionManager:
     def __init__(self):
-        # Diccionario que guarda una LISTA de sockets por cada game_id
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, game_id: str):
@@ -11,7 +10,7 @@ class ConnectionManager:
         if game_id not in self.active_connections:
             self.active_connections[game_id] = []
         
-        # IMPORTANTE: Solo añadimos si no está ya (evita duplicados)
+        # Solo añadimos si no está ya (evita duplicados)
         if websocket not in self.active_connections[game_id]:
             self.active_connections[game_id].append(websocket)
             print(f"DEBUG: Conexión añadida a sala {game_id}. Total: {len(self.active_connections[game_id])}")

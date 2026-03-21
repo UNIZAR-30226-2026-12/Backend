@@ -51,7 +51,7 @@ async def join_public_lobby(game_id: str, current_user: dict = Depends(get_curre
     if not lobby:
         raise HTTPException(status_code=400, detail="La sala ya está llena o no existe.")
 
-    # Marcamos la sala como "en juego" en la memoria RAM
+    # Marcamos la sala como en juego en la memoria RAM
     game_manager.set_game_playing(game_id)
     
     return {"status": "success", "game_id": game_id, "message": "Te has unido a la partida"}
