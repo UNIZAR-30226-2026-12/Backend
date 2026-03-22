@@ -1,7 +1,7 @@
 import requests
 import uuid
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8081"
 
 def create_and_login(username, email, password):
     reg_data = {"username": username, "email": email, "password": password}

@@ -1,7 +1,7 @@
 import requests
 import uuid
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8081"
 
 def test_auth_flow():
     # 1. Register a new user

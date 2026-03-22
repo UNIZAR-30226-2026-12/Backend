@@ -36,16 +36,14 @@ async def test_websocket_flow():
     game_id = res.json()["game_id"]
     print(f"Sala creada en BD: {game_id}")
     
-    ws_endpoint = f"{WS_URL}/ws/play/{game_id}"
-
-    async with websockets.connect(ws_endpoint) as ws1:
+    async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1:
         await safe_recv(ws1, "Jugador 1 (Color)")
         await safe_recv(ws1, "Jugador 1 (Aviso Espera)")
 
         print("\nJugador 2 se une a la sala")
         requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t2}"})
 
-        async with websockets.connect(ws_endpoint) as ws2:
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
             await safe_recv(ws2, "Jugador 2 (Color)")
             
             print("\nEsperando que el servidor envie el tablero a ambos")
@@ -63,7 +61,7 @@ async def test_websocket_flow():
                 res2 = await safe_recv(ws2, "Jugador 2 (Resultado mov)")
                 
                 if res1 and res2:
-                    print("\nEL MOVIMIENTO FUE PROCESADO Y REPLICADO PERFECTAMENTE.")
+                    print("\nEXITO TOTAL")
             else:
                 print("\nFallo en la sincronizacion del tablero inicial.")
 

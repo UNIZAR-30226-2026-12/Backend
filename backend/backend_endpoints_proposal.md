@@ -1,60 +1,101 @@
-# Propuesta de Endpoints para el Backend de Random Reversi
+1. Autenticación y Usuarios (/api/auth y /api/users)
+Gestión del ciclo de vida de las cuentas, perfiles e inicio de sesión. Las rutas REST (excepto login/register) requieren la cabecera HTTP Authorization: Bearer <token>.
 
-A continuación se detalla una propuesta arquitectónica y de API (REST/WebSockets) para dar vida al juego. El backend será el encargado de manejar la lógica del juego (Reversi), la base de datos (PostgreSQL), la seguridad y la concurrencia entre jugadores.
+POST /api/auth/register: Crea un nuevo usuario. Hashea la contraseña antes de guardarla en PostgreSQL e inicializa el ELO a 1000.
 
-## 1. Autenticación y Usuarios (`/api/auth` y `/api/users`)
-Gestión del ciclo de vida de las cuentas, perfiles e inicio de sesión.
-*   `POST /api/auth/register`: Crea un nuevo usuario. Deberá hashear la contraseña antes de guardarla en PostgreSQL.
-*   `POST /api/auth/login`: Verifica credenciales y devuelve un token de sesión (ej. JWT).
-*   `GET  /api/users/me`: Devuelve los datos del usuario autenticado (username, ELO, estadísticas, avatar, colores preferidos).
-*   `PUT  /api/users/me`: Actualiza las preferencias e información básica del usuario.
-*   `PUT  /api/users/customization`: Actualiza la configuración de estilo del usuario (avatar elegido, tableros y fichas preferidas).
-*   `POST /api/users/avatar`: Permite subir una imagen con formato multipart-form data.
-*   `GET  /api/users/:userId/stats`: Consulta las estadísticas de un usuario en específico.
-*   `GET  /api/users/me/history`: Historial de partidas del jugador, mostrando si ganó, perdió o empató, y la fluctuación de ELO.
+POST /api/auth/login: Verifica credenciales (username y password) y devuelve un token de sesión JWT (access_token).
 
-## 2. Sistema Social y Amigos (`/api/friends`)
-Permite invitar y listar a otros jugadores.
-*   `GET  /api/friends`: Lista todos los amigos, solicitudes pendientes y peticiones de juego a la vez (o se puede desglosar).
-*   `POST /api/friends/request`: Envía una solicitud de amistad a otro jugador mediante su `username`.
-*   `POST /api/friends/:userId/accept`: Acepta una solicitud recibida.
-*   `POST /api/friends/:userId/reject`: Rechaza una solicitud de amistad enviada hacia nosotros.
-*   `DELETE /api/friends/:userId`: Elimina a un amigo de nuestra lista de amigos.
-*   `POST /api/games/invite`: Invita a un amigo a unirse a una partida (1vs1 o 1vs1vs1vs1).
+GET  /api/users/me: Devuelve los datos del usuario autenticado (username, email, ELO, avatar, colores preferidos).
 
-## 3. Emparejamiento y Salas (Matchmaking) (`/api/lobbies` y `/api/games`)
-Para jugar online, los jugadores deben encontrar partidas públicas o crear cerradas.
-*   `GET  /api/games/public`: Lista las salas públicas actuales esperando jugadores (status: 'waiting'), mostrando número de plaza (ej: 2/4), creador y ELO.
-*   `POST /api/games`: Crea una nueva sala de partida (1vs1 o 1vs1vs1vs1), devolviendo un ID de sala (`gameId`).
-*   `POST /api/games/:gameId/join`: Inscribe a un jugador secundario a la sala de juego y notifica para su inicio.
+PUT  /api/users/me: Actualiza la información básica del usuario (username, email).
 
-## 4. Clasificación e Historial (`/api/leaderboard`)
-*   `GET /api/leaderboard`: Devuelve el ranking global (Top N jugadores) ordenado por **ELO actual**. Puede incluir filtros (mensual, amigos, global).
+PUT  /api/users/customization: Actualiza la configuración de estilo del usuario (avatar elegido, color de tablero y fichas).
 
-## 5. Partida en Curso y Lógica del Juego (WebSockets)
-> [!IMPORTANT]
-> Para la jugabilidad en tiempo real y mecánicas especiales con **Habilidades** (bombas, cambio de polaridad de fichas, alteración de turnos), **REST no es suficiente**. Es esencial conectar cada juego vía un Endpoint de **WebSocket** (`ws://dominio/api/games/:gameId/ws`) que fluya la información al instante.
+POST /api/users/avatar: Permite subir una imagen con formato multipart/form-data y devuelve la URL pública.
 
-### Mensajes (Topics) del WebSocket
-*   **`room_sync`**: Sincroniza y presenta a la sala quiénes se han unido antes de empezar.
-*   **`game_state_update`**: El servidor envía la matriz de fichas, de quién es el turno, turnos saltados (`skipTurns`) y listas de habilidades pendientes por usar.
-*   **`player_move`**: El cliente notifica al servidor "El jugador A se mueve a {row: X, col: Y}". El servidor valida y si es correcto emite el nuevo tablero a todos.
-*   **`use_ability`**: Mensaje clave donde un jugador usa una habilidad especial (`bomb`, `skip_rival_turn`, etc.). El servidor evalúa las consecuencias geográficas en el tablero y reemite hacia todos los clientes lo ocurrido.
-*   **`player_resign`**: Un usuario notifica que se da de baja intencional. El servidor ajusta la balanza de ELO.
+GET  /api/users/{userId}/stats: Consulta las estadísticas de un usuario en específico (ELO, partidas totales, victorias).
 
-### El Motor de Reglas en Backend (Cálculos de Movimientos)
-El servidor es la verdadera fuente de la verdad para evitar trampas:
-1.  **Validación de turno**: Verificar si el mensaje que llega y su firma corresponden al que le toca.
-2.  **Cálculo de Flanqueo (Flanking)**: En Reversi, colocar una ficha debe "encerrar" fichas enemigas en vertical, horizontal o diagonal para voltearlas.
-3.  **Mecanismo de Items y Puntería**: Muchas fichas ("?") dan habilidades. El servidor es quien otorga una aleatoria (de entre las 15) al pisarlas.
-4.  **Condición de Fin**: El servidor evalúa cuándo finalizan los movimientos o recursos, dando el fallo ELO final.
+PUT  /api/users/me/elo: Actualiza el ELO del jugador de forma segura tras una partida.
 
-## 6. Jugador vs IA Offline/Red Local
+POST /api/users/me/history: Registra una partida finalizada en el historial del jugador.
+
+GET  /api/users/me/history: Devuelve el historial de partidas del jugador ordenado por fecha.
+
+2. Sistema Social y Amigos (/api/friends)
+Permite gestionar la red de contactos del jugador.
+
+GET  /api/friends: Lista 1) Amigos confirmados, 2) Solicitudes pendientes de aceptar, y 3) Invitaciones a juegos en curso.
+
+POST /api/friends/request: Envía una solicitud de amistad a otro jugador mediante su username (incluye límite de bloqueos por rechazos múltiples).
+
+POST /api/friends/{userId}/accept: Acepta una solicitud recibida.
+
+POST /api/friends/{userId}/reject: Rechaza una solicitud de amistad (aumentando el contador de rechazos).
+
+DELETE /api/friends/{userId}: Elimina a un amigo de nuestra lista o cancela una relación existente.
+
+3. Emparejamiento y Salas (Matchmaking) (/api/games)
+Gestión de partidas públicas y el sistema de Retos Privados directos.
+
+Salas Públicas
+POST /api/games/create: Crea una nueva sala pública online (status: 'waiting'). Inicializa el tablero en la RAM del servidor y devuelve el game_id.
+
+GET  /api/games/public: Lista las salas públicas actuales esperando jugadores. (Incluye resiliencia: si el servidor reinicia, reconstruye el tablero en RAM).
+
+POST /api/games/join/{game_id}: El Jugador 2 se une a una sala pública existente. La base de datos bloquea concurrentemente el acceso a un tercer jugador y marca la sala como 'playing'.
+
+Retos Privados (Notificaciones Push)
+POST /api/games/invite?target_username={user}: Crea una sala privada (solo en base de datos) y envía el desafío al instante por WebSocket.
+
+POST /api/games/{game_id}/accept: El amigo acepta el desafío. Activa el tablero en la RAM y envía un aviso por WS al retador original para que se una.
+
+POST /api/games/{game_id}/reject: El amigo rechaza el desafío. Borra la sala pendiente de la BD y notifica al creador.
+
+4. Clasificación e Historial (/api/leaderboard)
+GET /api/leaderboard: Devuelve el ranking global (Top N jugadores) ordenado por ELO actual. Puede incluir filtros (mensual, amigos, global). (Implementación pendiente)
+
+5. Canales de Tiempo Real (WebSockets)
+[!IMPORTANT]
+Seguridad por URL: Como los WebSockets no soportan cabeceras de autorización nativas, ambos endpoints requieren enviar el token en la URL: ?token={jwt}. Si es inválido, el servidor cerrará la conexión con el código HTTP 1008.
+
+A) El Canal Global (/ws/notifications)
+WS /ws/notifications?token={jwt}: Debe conectarse nada más abrir la App. Mantiene un mapeo 1:1 en el servidor.
+
+Recibe: duel_invite (Aparece el Pop-up de desafío).
+
+Recibe: invite_response (Avisa de si el rival aceptó o rechazó tu desafío).
+
+B) La Partida en Curso (/ws/play/{game_id})
+WS /ws/play/{game_id}?token={jwt}: Canal de alta frecuencia para la jugabilidad.
+
+player_assignment (Server->Client): Asigna color (black/white).
+
+waiting_for_player (Server->Client): Mensaje de espera para el creador.
+
+game_state_update (Server->Client, Broadcast): Envía a ambos el estado completo (tablero, turno, movimientos válidos, puntuación y estado de la partida).
+
+make_move (Client->Server): Petición JSON: {"action": "make_move", "row": X, "col": Y, "player": "black"}.
+
+error (Server->Client, Unicast): Avisa si el movimiento fue inválido, ilegal o fuera de turno (solo lo ve el infractor).
+
+6. Motor de Reglas en Backend (Cálculos de Movimientos)
+El servidor es la verdadera fuente de la verdad para evitar trampas.
+
+RAM vs Base de Datos: Para evitar lag, las partidas activas viven en un diccionario en la memoria RAM del servidor. Solo se toca PostgreSQL al iniciar o finalizar.
+
+Validación de turno: Verificar si el mensaje que llega corresponde al que le toca y que la partida no ha acabado.
+
+Cálculo de Flanqueo (Flanking): En Reversi, el servidor valida el movimiento y se encarga de voltear las fichas en vertical, horizontal o diagonal.
+
+(Futuro) Mecanismo de Items y Habilidades: El servidor otorgará los efectos especiales (bombas, saltos de turno) y reemitirá el estado alterado a todos.
+
+7. Jugador vs IA Offline/Red Local
 Puesto que en el frontend el usuario puede elegir jugar "Contra la IA", tienes dos opciones:
-*   **A) Lógica en Frontend:** El cliente resuelve el algoritmo "Minimax" en Javascript localmente (no necesita consultar al servidor para mover, ideal si no guarda estadísticas en BBDD).
-*   **B) IA Server-Side:** Un bot gestionado por el servidor detecta que se juega "contra máquina" y se auto-asigna el turno generando sus respuestas "minimax" y devolviéndolas por WebSocket como otro cliente más.
 
----
-> [!TIP]
-> **Base de Datos (Transaccional)**
-> PostgreSQL funcionará perfectamente. Las tablas actuales de `users`, `friendships`, `lobbies`, `games` (estado general, modo, ganadores y ELO) y `moves` proveen un marco inicial sólido que solo requería pequeñas ampliaciones (como `invited_id` en `lobbies`).
+A) Lógica en Frontend: El cliente resuelve el algoritmo "Minimax" en Javascript localmente (no necesita consultar al servidor para mover, ideal si no guarda estadísticas en BBDD).
+
+B) IA Server-Side: Un bot gestionado por el servidor detecta que se juega "contra máquina" y se auto-asigna el turno generando sus respuestas "minimax" y devolviéndolas por WebSocket como otro cliente más.
+
+[!TIP]
+Base de Datos (Transaccional)
+PostgreSQL funciona perfectamente. Las tablas actuales de users, friendships, lobbies (con el estado 'waiting' o 'playing'), games y game_history proveen un marco robusto y ya testeado para soportar miles de partidas concurrentes.
