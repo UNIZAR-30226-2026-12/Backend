@@ -36,16 +36,15 @@ async def register(user: UserCreate):
 
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    username = form_data.username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="Nombre de usuario o contraseña incorrectos")
+    email = form_data.username.strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Correo electrónico o contraseña incorrectos")
 
-    query = "SELECT * FROM users WHERE username = :username"
-    user = await database.fetch_one(query=query, values={"username": username})
-    
+    query = "SELECT * FROM users WHERE email = :email"
+    user = await database.fetch_one(query=query, values={"email": email})
+
     if not user or not verify_password(form_data.password, user["password_hash"]):
-        raise HTTPException(status_code=400, detail="Nombre de usuario o contraseña incorrectos")
-    
+        raise HTTPException(status_code=400, detail="Correo electrónico o contraseña incorrectos")
     access_token = create_access_token(
         data={"sub": str(user["id"])}, 
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
