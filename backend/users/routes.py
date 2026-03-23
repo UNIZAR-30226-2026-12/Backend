@@ -17,21 +17,71 @@ router = APIRouter()
 async def read_users_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
+@router.get("/me/stats")
+async def read_my_stats(current_user: dict = Depends(get_current_user)):
+    return await get_user_statistics(current_user["id"])
+
 @router.get("/{user_id}/stats")
 async def read_user_stats(user_id: int):
+    return await get_user_statistics(user_id)
+
+async def get_user_statistics(user_id: int):
     query = "SELECT elo, username FROM users WHERE id = :user_id"
     user = await database.fetch_one(query=query, values={"user_id": user_id})
     if not user:
          raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    query_games = "SELECT COUNT(*) as total, SUM(CASE WHEN winner_id = :user_id THEN 1 ELSE 0 END) as wins FROM games WHERE player1_id = :user_id OR player2_id = :user_id"
+    query_games = """
+        SELECT COUNT(*) as total, 
+               SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN result = 'Perdida' THEN 1 ELSE 0 END) as losses,
+               SUM(CASE WHEN result = 'Empate' THEN 1 ELSE 0 END) as draws
+        FROM game_history 
+        WHERE user_id = :user_id
+    """
     stats = await database.fetch_one(query=query_games, values={"user_id": user_id})
+    
+    total = stats["total"] if stats and stats["total"] else 0
+    wins = stats["wins"] if stats and stats["wins"] else 0
+    losses = stats["losses"] if stats and stats["losses"] else 0
+    draws = stats["draws"] if stats and stats["draws"] else 0
+    winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
     
     return {
         "username": user["username"],
         "elo": user["elo"],
-        "total_games": stats["total"] if stats else 0,
-        "wins": stats["wins"] if stats and stats["wins"] else 0
+        "total_games": total,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "winrate": winrate
+    }
+
+@router.get("/{user_id}/h2h")
+async def read_h2h(user_id: int, current_user: dict = Depends(get_current_user)):
+    query_friend = "SELECT username FROM users WHERE id = :user_id"
+    friend = await database.fetch_one(query=query_friend, values={"user_id": user_id})
+    if not friend:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+    friend_name = friend["username"]
+    
+    query_h2h = """
+        SELECT 
+            COUNT(*) as total_matches,
+            SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN result = 'Perdida' THEN 1 ELSE 0 END) as losses,
+            SUM(CASE WHEN result = 'Empate' THEN 1 ELSE 0 END) as draws
+        FROM game_history
+        WHERE user_id = :uid AND opponent_name = :opp_name
+    """
+    stats = await database.fetch_one(query=query_h2h, values={"uid": current_user["id"], "opp_name": friend_name})
+    
+    return {
+        "total_matches": stats["total_matches"] if stats and stats["total_matches"] else 0,
+        "wins": stats["wins"] if stats and stats["wins"] else 0,
+        "losses": stats["losses"] if stats and stats["losses"] else 0,
+        "draws": stats["draws"] if stats and stats["draws"] else 0
     }
 
 @router.put("/me", response_model=UserResponse)
@@ -132,13 +182,21 @@ async def create_my_history_entry(
 
 @router.get("/me/history", response_model=List[GameHistoryResponse])
 async def get_my_history(current_user: dict = Depends(get_current_user)):
+    return await get_user_history_data(current_user["id"])
+
+@router.get("/{user_id}/history", response_model=List[GameHistoryResponse])
+async def get_user_history(user_id: int):
+    return await get_user_history_data(user_id)
+
+async def get_user_history_data(user_id: int):
     query = """
         SELECT id, created_at, mode, result, score, rank_change
         FROM game_history
         WHERE user_id = :uid
         ORDER BY created_at DESC
+        LIMIT 10
     """
-    rows = await database.fetch_all(query=query, values={"uid": current_user["id"]})
+    rows = await database.fetch_all(query=query, values={"uid": user_id})
 
     history = []
     for row in rows:
