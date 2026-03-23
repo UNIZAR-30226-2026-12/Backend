@@ -14,6 +14,7 @@ CREATE TABLE users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     elo INTEGER NOT NULL DEFAULT 1000,
+    peak_elo INTEGER,
     avatar_url TEXT,
     preferred_piece_color VARCHAR(20) DEFAULT 'black',
     preferred_board_color VARCHAR(20) DEFAULT 'green',
@@ -83,6 +84,7 @@ CREATE TABLE game_history (
     result VARCHAR(20) NOT NULL,
     score VARCHAR(50) NOT NULL DEFAULT 'N/A',
     rank_change VARCHAR(20) NOT NULL DEFAULT '0 RR',
+    player_color VARCHAR(10) NOT NULL DEFAULT 'black', -- 'black' | 'white'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

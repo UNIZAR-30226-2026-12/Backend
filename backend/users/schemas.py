@@ -19,6 +19,7 @@ class GameHistoryCreate(BaseModel):
     result: str
     score: str
     rankChange: str
+    player_color: Optional[str] = "black"   # 'black' | 'white'
 
 class GameHistoryResponse(BaseModel):
     id: int
@@ -27,3 +28,4 @@ class GameHistoryResponse(BaseModel):
     result: str
     score: str
     rankChange: str
+    player_color: Optional[str] = None

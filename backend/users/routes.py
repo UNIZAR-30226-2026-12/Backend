@@ -26,36 +26,113 @@ async def read_user_stats(user_id: int):
     return await get_user_statistics(user_id)
 
 async def get_user_statistics(user_id: int):
-    query = "SELECT elo, username FROM users WHERE id = :user_id"
+    query = "SELECT elo, username, peak_elo FROM users WHERE id = :user_id"
     user = await database.fetch_one(query=query, values={"user_id": user_id})
     if not user:
          raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
+
+    # ── Estadísticas básicas ──────────────────────────────────────────────
     query_games = """
-        SELECT COUNT(*) as total, 
+        SELECT COUNT(*) as total,
                SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins,
                SUM(CASE WHEN result = 'Perdida' THEN 1 ELSE 0 END) as losses,
                SUM(CASE WHEN result = 'Empate' THEN 1 ELSE 0 END) as draws
-        FROM game_history 
+        FROM game_history
         WHERE user_id = :user_id
     """
     stats = await database.fetch_one(query=query_games, values={"user_id": user_id})
-    
-    total = stats["total"] if stats and stats["total"] else 0
-    wins = stats["wins"] if stats and stats["wins"] else 0
-    losses = stats["losses"] if stats and stats["losses"] else 0
-    draws = stats["draws"] if stats and stats["draws"] else 0
+
+    total  = stats["total"]  or 0
+    wins   = stats["wins"]   or 0
+    losses = stats["losses"] or 0
+    draws  = stats["draws"]  or 0
     winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
-    
+
+    # ── Mejor racha de victorias consecutivas ────────────────────────────
+    query_results = """
+        SELECT result FROM game_history
+        WHERE user_id = :user_id
+        ORDER BY created_at ASC
+    """
+    rows = await database.fetch_all(query=query_results, values={"user_id": user_id})
+    win_streak = 0
+    current_streak = 0
+    for row in rows:
+        if row["result"] == "Ganada":
+            current_streak += 1
+            win_streak = max(win_streak, current_streak)
+        else:
+            current_streak = 0
+
+    # ── Winrate por color de ficha ────────────────────────────────────────
+    query_color = """
+        SELECT player_color,
+               COUNT(*) as total,
+               SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins
+        FROM game_history
+        WHERE user_id = :user_id
+        GROUP BY player_color
+    """
+    color_rows = await database.fetch_all(query=query_color, values={"user_id": user_id})
+    winrate_black = 0.0
+    winrate_white = 0.0
+    for cr in color_rows:
+        if cr["total"] > 0:
+            wr = round((cr["wins"] / cr["total"]) * 100, 1)
+            if cr["player_color"] == "black":
+                winrate_black = wr
+            elif cr["player_color"] == "white":
+                winrate_white = wr
+
+    # ── Némesis: rival que más veces nos ha ganado ────────────────────────
+    query_nemesis = """
+        SELECT opponent_name, COUNT(*) as cnt
+        FROM game_history
+        WHERE user_id = :user_id AND result = 'Perdida'
+        GROUP BY opponent_name
+        ORDER BY cnt DESC
+        LIMIT 1
+    """
+    nemesis_row = await database.fetch_one(query=query_nemesis, values={"user_id": user_id})
+    nemesis_name   = nemesis_row["opponent_name"] if nemesis_row and nemesis_row["cnt"] > 0 else None
+    nemesis_losses = nemesis_row["cnt"] if nemesis_row else 0
+
+    # ── Víctima: rival al que más veces hemos ganado ──────────────────────
+    query_victim = """
+        SELECT opponent_name, COUNT(*) as cnt
+        FROM game_history
+        WHERE user_id = :user_id AND result = 'Ganada'
+        GROUP BY opponent_name
+        ORDER BY cnt DESC
+        LIMIT 1
+    """
+    victim_row = await database.fetch_one(query=query_victim, values={"user_id": user_id})
+    victim_name = victim_row["opponent_name"] if victim_row and victim_row["cnt"] > 0 else None
+    victim_wins = victim_row["cnt"] if victim_row else 0
+
+    # ── Pico de RR ───────────────────────────────────────────────────────
+    # Si la columna peak_elo aún es NULL usamos el elo actual
+    peak_elo = user["peak_elo"] if user["peak_elo"] is not None else user["elo"]
+
     return {
-        "username": user["username"],
-        "elo": user["elo"],
-        "total_games": total,
-        "wins": wins,
-        "losses": losses,
-        "draws": draws,
-        "winrate": winrate
+        "username":       user["username"],
+        "elo":            user["elo"],
+        "total_games":    total,
+        "wins":           wins,
+        "losses":         losses,
+        "draws":          draws,
+        "winrate":        winrate,
+        # Avanzadas
+        "peak_elo":       peak_elo,
+        "win_streak":     win_streak,
+        "winrate_black":  winrate_black,
+        "winrate_white":  winrate_white,
+        "nemesis_name":   nemesis_name,
+        "nemesis_losses": nemesis_losses,
+        "victim_name":    victim_name,
+        "victim_wins":    victim_wins,
     }
+
 
 @router.get("/{user_id}/h2h")
 async def read_h2h(user_id: int, current_user: dict = Depends(get_current_user)):
@@ -140,7 +217,13 @@ async def update_customization(update: CustomizationUpdate, current_user: dict =
 
 @router.put("/me/elo", response_model=UserResponse)
 async def update_my_elo(update: EloUpdate, current_user: dict = Depends(get_current_user)):
-    query = "UPDATE users SET elo = :elo WHERE id = :uid"
+    # Actualizar elo; también actualizar peak_elo si se supera el máximo anterior
+    query = """
+        UPDATE users
+        SET elo = :elo,
+            peak_elo = GREATEST(COALESCE(peak_elo, elo), :elo)
+        WHERE id = :uid
+    """
     await database.execute(query=query, values={"elo": update.elo, "uid": current_user["id"]})
 
     updated_user = await database.fetch_one(
@@ -155,19 +238,20 @@ async def create_my_history_entry(
     current_user: dict = Depends(get_current_user),
 ):
     query = """
-        INSERT INTO game_history (user_id, opponent_name, mode, result, score, rank_change)
-        VALUES (:user_id, :opponent_name, :mode, :result, :score, :rank_change)
-        RETURNING id, created_at, mode, result, score, rank_change
+        INSERT INTO game_history (user_id, opponent_name, mode, result, score, rank_change, player_color)
+        VALUES (:user_id, :opponent_name, :mode, :result, :score, :rank_change, :player_color)
+        RETURNING id, created_at, mode, result, score, rank_change, player_color
     """
     row = await database.fetch_one(
         query=query,
         values={
-            "user_id": current_user["id"],
+            "user_id":       current_user["id"],
             "opponent_name": entry.opponent_name.strip(),
-            "mode": entry.mode,
-            "result": entry.result,
-            "score": entry.score,
-            "rank_change": entry.rankChange,
+            "mode":          entry.mode,
+            "result":        entry.result,
+            "score":         entry.score,
+            "rank_change":   entry.rankChange,
+            "player_color":  entry.player_color or "black",
         },
     )
 
@@ -178,6 +262,7 @@ async def create_my_history_entry(
         result=row["result"],
         score=row["score"],
         rankChange=row["rank_change"],
+        player_color=row["player_color"],
     )
 
 @router.get("/me/history", response_model=List[GameHistoryResponse])
