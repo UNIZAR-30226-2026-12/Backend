@@ -1,55 +1,81 @@
+import asyncio
+import websockets
 import requests
+import json
+import uuid
 
 BASE_URL = "http://localhost:8000"
+WS_URL = "ws://localhost:8000"
 
-def test_game_flow():
-    # 1. Create a new game
-    print("--- 1. Creating a new game ---")
-    response = requests.post(f"{BASE_URL}/partida")
-    if response.status_code == 200:
-        game_state = response.json()
-        game_id = game_state["game_id"]
-        print(f"Game created! ID: {game_id}")
-        print(f"Score: {game_state['score']}")
-    else:
-        print(f"Failed to create game: {response.status_code} - {response.text}")
-        return
+def create_and_login(username, password):
+    email = f"{username}@test.com"
+    requests.post(f"{BASE_URL}/api/auth/register", json={"username": username, "email": email, "password": password})
+    res = requests.post(f"{BASE_URL}/api/auth/login", data={"username": username, "password": password})
+    return res.json()["access_token"]
 
-    # 2. Make a move
-    # In Reversi, valid moves are usually around the center for 'black' (first player)
-    # The initial board is:
-    # 3,3: white, 4,4: white, 3,4: black, 4,3: black
-    # Valid moves for black: (2,3), (3,2), (4,5), (5,4)
-    print("\n--- 2. Making a move (Black: 2,3) ---")
-    move_data = {
-        "game_id": game_id,
-        "row": 2,
-        "col": 3,
-        "player": "black"
-    }
+async def safe_recv(ws, name):
+    try:
+        # Esperamos hasta 5 segundos (la IA tarda 0.5s intencionadamente)
+        msg = await asyncio.wait_for(ws.recv(), timeout=5.0)
+        print(f"-> {name} recibe: {msg[:100]}...") 
+        return json.loads(msg)
+    except asyncio.TimeoutError:
+        print(f"ERROR: {name} se quedó esperando el mensaje (Timeout).")
+        return None
+
+async def test_ia_flow():
+    print("--- Iniciando prueba de Partida vs IA ---")
+    u1 = f"humano_{uuid.uuid4().hex[:4]}"
     
-    response = requests.post(f"{BASE_URL}/movimiento", json=move_data)
-    if response.status_code == 200:
-        game_state = response.json()
-        print("Move successful!")
-        print(f"New score: {game_state['score']}")
-        print(f"Current player: {game_state['current_player']}")
+    print(f"\n1. Registrando y logueando usuario '{u1}'...")
+    token = create_and_login(u1, "pass123")
+    
+    print("\n2. Creando sala contra la IA (mode: vs_ai)...")
+    res = requests.post(
+        f"{BASE_URL}/api/games/create", 
+        headers={"Authorization": f"Bearer {token}"},
+        json={"mode": "vs_ai"} # <--- Pasamos el nuevo parámetro
+    )
+    
+    if res.status_code != 200:
+        print(f"Error creando sala: {res.text}")
+        return
         
-        if game_state['last_move']:
-            lm = game_state['last_move']
-            print(f"Last move (should be AI if it moved): {lm['row']},{lm['col']}")
-    else:
-        print(f"Move failed: {response.status_code} - {response.text}")
+    game_id = res.json()["game_id"]
+    print(f"Sala creada con éxito. ID: {game_id}")
+    
+    print("\n3. Conectando al WebSocket de la partida...")
+    ws_url = f"{WS_URL}/ws/play/{game_id}?token={token}"
+    
+    async with websockets.connect(ws_url) as ws:
+        # 1. El servidor nos asigna color
+        await safe_recv(ws, "Asignación de Color")
+        
+        # 2. Como es vs_ai, el juego empieza YA y manda el tablero inicial
+        tablero_inicial = await safe_recv(ws, "Tablero Inicial")
+        if not tablero_inicial: return
 
-    # 3. List valid moves for next turn
-    print("\n--- 3. Valid moves for next turn ---")
-    if game_state['valid_moves']:
-        print(f"Valid moves count: {len(game_state['valid_moves'])}")
-        # print first 5
-        for m in game_state['valid_moves'][:5]:
-            print(f"- ({m['row']}, {m['col']})")
-    else:
-        print("No valid moves available or game over.")
+        print("\n4. Enviando nuestro movimiento: Negras a la fila 2, columna 3...")
+        movimiento = {"action": "make_move", "row": 2, "col": 3, "player": "black"}
+        await ws.send(json.dumps(movimiento))
+        
+        # 3. Recibir el tablero después de nuestro movimiento
+        print("\nEsperando confirmación de nuestro movimiento...")
+        estado_humano = await safe_recv(ws, "Tablero (Post-Humano)")
+        
+        # 4. LA MAGIA: Recibir el tablero después del contrataque de la IA
+        print("\nEsperando el contrataque de la IA...")
+        estado_ia = await safe_recv(ws, "Tablero (Post-IA)")
+        
+        if estado_humano and estado_ia:
+            current = estado_ia["payload"]["current_player"]
+            ia_move = estado_ia["payload"]["last_move"]
+            
+            print(f"\n¡ÉXITO TOTAL!")
+            print(f"La IA (Minimax) ha respondido moviendo en la posición: {ia_move}")
+            print(f"El turno ha vuelto automáticamente a: '{current}'")
+        else:
+            print("\n Fallo: La IA no respondió a tiempo o hubo un error.")
 
 if __name__ == "__main__":
-    test_game_flow()
+    asyncio.run(test_ia_flow())

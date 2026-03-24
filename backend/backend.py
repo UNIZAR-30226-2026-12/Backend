@@ -9,27 +9,12 @@ from avatar.routes import router as avatar_router
 from friends.routes import router as friends_router
 from lobby.routes import router as lobby_router
 from persistence.database import database
+from ranking.routes import router as ranking_router
 from users.routes import router as users_router
 from ws.routes import router as ws_router
 
 """
-Endpoints del Backend:
-- POST /api/auth/register : Registro de nuevos usuarios
-- POST /api/auth/login : Inicio de sesión (OAuth2)
-- GET  /api/users/me : Obtener datos del perfil actual
-- GET  /api/users/{user_id}/stats : Obtener estadísticas de un usuario
-- PUT  /api/users/me : Actualizar información básica (username, email)
-- PUT  /api/users/customization : Actualizar preferencias estéticas
-- POST /api/users/avatar : Subida de imagen de avatar
-- GET  /api/users/me/history : Historial de partidas del usuario
-- GET  /api/friends : Listar amigos, solicitudes e invitaciones a juegos
-- POST /api/friends/request : Enviar solicitud de amistad
-- POST /api/friends/{user_id}/accept : Aceptar solicitud de amistad
-- POST /api/friends/{user_id}/reject : Rechazar solicitud o eliminar amigo
-- DELETE /api/friends/{user_id} : Eliminar amigo (alias de reject)
-- POST /api/games/invite : Invitar a un amigo a una partida privada
-- POST /partida : Crear partida rápida
-- POST /movimiento : Realizar movimiento en partida
+Endpoints del Backend ---> mirar en APIDOCS.md
 """
 
 app = FastAPI(title="Reversi AI Backend")
@@ -55,6 +40,7 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(avatar_router, prefix="/api/users", tags=["Avatar"])
 app.include_router(friends_router, prefix="/api/friends", tags=["Friends"])
 app.include_router(lobby_router, prefix="/api/games", tags=["Games/Lobby"])
+app.include_router(ranking_router, prefix="/api/ranking", tags=["Ranking"]) 
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(ws_router, prefix="/ws", tags=["WebSockets"])
 

@@ -3,18 +3,30 @@ from fastapi import APIRouter, Depends, HTTPException
 from auth.dependencies import get_current_user
 from game.manager import game_manager
 from persistence.database import database
+from pydantic import BaseModel
 
 router = APIRouter()
 
+class GameCreateRequest(BaseModel):
+    mode: str = "1v1"  # Por defecto es 1vs1. Opciones: "vs_ai", "4v4", "caos"
+
+class GameInviteRequest(BaseModel):
+    friend_username: str
+    mode: str = "1v1"
+
 @router.post("/create")
-async def create_public_lobby(current_user: dict = Depends(get_current_user)):
-    """El creador pide abrir una sala pública online."""
-    query = "INSERT INTO lobbies (creator_id, is_public, status) VALUES (:creator_id, true, 'waiting') RETURNING id"
-    lobby_id = await database.execute(query=query, values={"creator_id": current_user["id"]})
+async def create_public_lobby(req: GameCreateRequest, current_user: dict = Depends(get_current_user)):
+    """El creador pide abrir una sala online (puede ser vs_ai o 1v1)."""
+    # Si es contra la IA, no queremos que aparezca en la lista de salas públicas
+    is_public = True if req.mode == "1v1" else False
+    
+    query = "INSERT INTO lobbies (creator_id, is_public, status) VALUES (:creator_id, :is_public, 'waiting') RETURNING id"
+    lobby_id = await database.execute(query=query, values={"creator_id": current_user["id"], "is_public": is_public})
     game_id = str(lobby_id)
     
-    game_manager.create_game(creator_name=current_user["username"], game_id=game_id)
-    return {"game_id": game_id, "creator": current_user["username"]}
+    # Pasamos el parámetro mode al manager
+    game_manager.create_game(creator_name=current_user["username"], game_id=game_id, mode=req.mode)
+    return {"game_id": game_id, "creator": current_user["username"], "mode": req.mode}
 
 @router.get("/public")
 async def get_public_lobbies():

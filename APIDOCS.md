@@ -1,134 +1,105 @@
 # 🎮 Reversi AI - API Documentation
 
-Este archivo resume el estado actual del backend (12 de Marzo 2026) tras la refactorización modular.
+Este archivo resume el estado actual del backend (Marzo 2026) tras la refactorización modular y la implementación del motor multijugador en tiempo real.
+
+> **⚠️ IMPORTANTE - AUTENTICACIÓN:** 
+> Todos los endpoints REST (excepto Auth público) requieren el header: `Authorization: Bearer <tu_token>`
+> Todos los WebSockets requieren el token como query parameter: `?token=<tu_token>`
 
 ---
 
-## 🔐 1. Autenticación y Usuarios
+## 🔐 1. Autenticación y Perfil de Usuario
 
-> **ℹ️ IMPORTANTE:** Todos los endpoints (excepto Login y Register) requieren el header:  
-> `Authorization: Bearer <tu_token>`
-
-| Método | Endpoint                     | Descripción                                     | Payload Sugerido                         |
-| ------ | ---------------------------- | ----------------------------------------------- | ---------------------------------------- |
-| POST   | `/api/auth/register`         | Registro de usuario                             | `{"username": "...", "password": "..."}` |
-| POST   | `/api/auth/login`            | Login de usuario                                | `{"username": "...", "password": "..."}` |
-| GET    | `/api/users/me`              | Obtener perfil propio                           | -                                        |
-| PUT    | `/api/users/me`              | Actualiza username o email                      | `{"username": "...", "email": "..."}`    |
-| PUT    | `/api/users/customization`   | Actualiza preferencias de interfaz (colores)    | `{"avatar_url": "..."}`                  |
-| GET    | `/api/users/{id}/stats`      | Estadísticas (ELO, partidas ganadas/perdidas)   | -                                        |
-| GET    | `/api/users/me/history`      | Historial de partidas terminadas                | -                                        |
-| POST   | `/api/users/avatar`          | Sube una imagen de avatar (Multipart)           | Archivo Multipart                        |
+| Método | Endpoint                    | Descripción                               | Request Payload Sugerido                               |
+| :---   | :---                        | :---                                      | :---                                                   |
+| **POST**| `/api/auth/register`        | Registro de nuevo usuario.               | `{"username": "...", "email": "...", "password": "..."}`|
+| **POST**| `/api/auth/login`           | Inicio de sesión (devuelve JWT).         | Form Data: `username=...&password=...`                 |
+| **GET** | `/api/users/me`             | Obtiene los datos del perfil actual.     | -                                                      |
+| **PUT** | `/api/users/me`             | Actualiza username o email.              | `{"username": "...", "email": "..."}`                  |
+| **PUT** | `/api/users/customization`  | Actualiza colores y avatar.              | `{"avatar_url": "...", "preferred_board_color": "green"}`|
+| **POST**| `/api/users/avatar`         | Sube una imagen de avatar real.          | Archivo (Multipart/form-data)                          |
 
 ---
 
-## 👥 2. Sistema Social (Amigos y Retos)
+## 📊 2. Estadísticas, Historial y Ranking
 
-Gestión de la lista de amigos y búsqueda de usuarios para duelos.
-
-| Método | Endpoint                     | Descripción                                          |
-| ------ | ---------------------------- | ---------------------------------------------------- |
-| GET    | `/api/friends`               | Lista de amigos conectados y solicitudes pendientes. |
-| POST   | `/api/friends/request`       | Enviar solicitud de amistad (`{"username": "..."}`). |
-| POST   | `/api/friends/{id}/accept`   | Aceptar una solicitud de amistad.                    |
-| POST   | `/api/friends/{id}/reject`   | Rechaza solicitud de amistad pendiente.              |
-| DELETE | `/api/friends/{id}`          | Elimina a un amigo de la lista de amigos.            |
+| Método | Endpoint                    | Descripción                                      | Request Payload Sugerido |
+| :---   | :---                        | :---                                             | :---                     |
+| **GET** | `/api/ranking/`             | Obtiene el Top 50 global ordenado por ELO.       | -                        |
+| **GET** | `/api/users/me/stats`       | Estadísticas propias (Winrate, Némesis, Rachas). | -                        |
+| **GET** | `/api/users/{id}/stats`     | Estadísticas públicas de otro jugador.           | -                        |
+| **GET** | `/api/users/me/history`     | Historial de las últimas 10 partidas jugadas.    | -                        |
+| **GET** | `/api/users/{id}/h2h`       | Estadísticas Head-to-Head contra un amigo.       | -                        |
 
 ---
 
-## 🎮 3. Lobby y Gestión de Duelos
+## 👥 3. Sistema Social (Amigos)
 
-Control de flujo antes de entrar a la partida.
+Gestión de la lista de amigos y solicitudes.
 
-### 🏠 Salas Públicas
-- **`POST /api/games/create`**: Crea una sala que aparecerá en el listado global.
-- **`GET /api/games/public`**: Devuelve un array de objetos tipo `{"game_id": "...", "creator": "..."}`.
-
-### ⚔️ Duelos Directos (Privados)
-- **`POST /api/games/invite`**: Crea una sala privada y envía una notificación al amigo.
-  - **Request**: `{"friend_username": "d"}`
-  - **Response**: `{"game_id": "UUID", "status": "sent"}`
-
-- **`POST /api/games/invite/accept`**: El invitado confirma la entrada.
-  - **Request**: `{"friend_username": "a"}`
-  - **Response**: `{"status": "success", "game_id": "UUID"}`
-
-- **`POST /api/games/invite/reject`**: El invitado rechaza. Se borra la sala y se notifica al creador.
-  - **Request**: `{"friend_username": "a"}`
+| Método | Endpoint                    | Descripción                                      | Request Payload Sugerido          |
+| :---   | :---                        | :---                                             | :---                              |
+| **GET** | `/api/friends`              | Lista de amigos y solicitudes pendientes.        | -                                 |
+| **POST**| `/api/friends/request`      | Envía una solicitud de amistad.                  | `{"username": "nombre_amigo"}`    |
+| **POST**| `/api/friends/{id}/accept`  | Acepta una solicitud entrante.                   | -                                 |
+| **POST**| `/api/friends/{id}/reject`  | Rechaza una solicitud entrante.                  | -                                 |
+| **DELETE**| `/api/friends/{id}`       | Elimina a un usuario de tu lista de amigos.      | -                                 |
 
 ---
 
-## ⚡ WebSockets (Comunicación en Vivo)
+## ⚔️ 4. Lobby y Gestión de Salas (Matchmaking)
 
-### A. Notificaciones Globales
+Control de flujo REST antes de saltar al WebSocket de la partida.
 
-**URL:** `ws://host:port/ws/notifications/{username}`
-
-**Propósito:** Mantener al usuario "online" y recibir invitaciones de duelo.
-
-**Evento Recibido (`duel_invite`)**
-
-```json
-{
-  "type": "duel_invite",
-  "payload": {
-    "creator": "username_retador",
-    "game_id": "UUID-1234",
-    "message": "¡username_retador te ha retado a un duelo!"
-  }
-}
-```
+| Método | Endpoint                    | Descripción                                      | Request Payload Sugerido       |
+| :---   | :---                        | :---                                             | :---                           |
+| **POST**| `/api/games/create`         | Crea una sala nueva. Modos: `"1v1"` o `"vs_ai"`.| `{"mode": "1v1"}`              |
+| **GET** | `/api/games/public`         | Devuelve listado de salas públicas esperando rival.| -                              |
+| **POST**| `/api/games/join/{game_id}` | El jugador 2 se une a una sala existente.        | -                              |
+| **POST**| `/api/games/invite`         | Crea sala privada e invita a un amigo (Push).    | `{"friend_username": "..."}`   |
 
 ---
 
-### B. Sala de Juego
+## ⚡ 5. WebSockets (Comunicación en Tiempo Real)
 
-**URL:** `ws://host:port/ws/play/{game_id}`
+### A. Canal de Notificaciones Globales
+*Mantener abierto siempre que el usuario esté logueado en la app.*
+* **URL:** `ws://host:port/ws/notifications?token={tu_token}`
+* **Eventos que emite el Servidor:**
+  * `duel_invite`: Cuando un amigo usa `/api/games/invite` contra ti.
+  * `friend_request`: Cuando alguien te envía una solicitud de amistad.
 
-**Propósito:** Sincronización del tablero y validación de movimientos.
+### B. Canal de Partida (In-Game)
+*Abrir inmediatamente después de crear o unirse a una sala.*
+* **URL:** `ws://host:port/ws/play/{game_id}?token={tu_token}`
 
-**1. Al conectar (Asignación)**  
-El servidor responde inmediatamente con el color asignado al usuario.
-```json
-{ 
-  "type": "player_assignment", 
-  "payload": { "color": "black" } 
-}
-```
+#### 📥 Acciones del Cliente (Lo que Frontend envía al Servidor)
+Formato siempre en JSON puro con la clave `action`.
 
-**2. Durante la partida (`game_state_update`)**  
-Se envía cada vez que el estado cambia (movimientos, conexiones).
-```json
-{
-  "type": "game_state_update",
-  "payload": {
-    "board": [
-      ["", "", ""],
-      ["", "black", "white"]
-    ],
-    "current_player": "white",
-    "score": {"black": 4, "white": 1},
-    "valid_moves": [{"row": 2, "col": 2}],
-    "game_over": false
-  }
-}
-```
+| Acción | Payload Estructural | Descripción |
+| :--- | :--- | :--- |
+| **Mover Ficha** | `{"action": "make_move", "row": 2, "col": 3, "player": "black"}` | Intenta colocar una ficha. El backend valida si es legal. |
+| **Chat** | `{"action": "chat", "message": "Hola rival"}` | Envía un mensaje de texto a la sala. |
+| **Rendirse** | `{"action": "surrender", "player": "black"}` | Termina la partida al instante. El rival gana y se ajusta el ELO. |
 
-**3. Realizar Movimiento (Cliente -> Servidor)**
-```json
-{
-  "action": "make_move",
-  "row": 2,
-  "col": 3,
-  "player": "black"
-}
-```
+#### 📤 Eventos del Servidor (Lo que Frontend recibe)
+Formato estructurado con `type` y `payload`.
 
-**4. Errores y Rechazos**  
-Si el rival rechaza el duelo mientras el creador de la sala inicial aún está esperando:
-```json
-{ 
-  "type": "invite_rejected", 
-  "payload": { "message": "El jugador rival ha rechazado el duelo." } 
-}
-```
+| Tipo de Evento (`type`) | Contenido del `payload` | Descripción |
+| :--- | :--- | :--- |
+| `player_assignment` | `{"color": "black"}` | Se envía nada más conectar para indicar tu bando. |
+| `waiting_for_player`| `{"message": "..."}` | Indica que eres el jugador 1 y el rival aún no ha entrado. |
+| `chat_message` | `{"sender": "UserX", "message": "Hola"}`| Un mensaje de texto recibido en la sala. |
+| `game_state_update` | `{"board": [...], "current_player": "white", "score": {"black": 4, "white": 1}, "valid_moves": [...], "game_over": false, "winner": null}` | **El núcleo del juego.** Se recibe tras cada movimiento válido o al terminar la partida. Dibuja la UI en base a esto. |
+| `error` | `{"message": "Movimiento inválido"}` | Se envía si intentas hacer algo ilegal o fuera de tu turno. |
+
+---
+
+## 🛑 6. Reglas de Desconexión y Abandono (Importante para UI)
+
+El backend implementa protección contra microcortes y ragequits. El Frontend debe estar preparado para este flujo:
+
+1. **Si un jugador cierra el WebSocket abruptamente:** La partida NO termina inmediatamente.
+2. **Ventana de Reconexión:** El servidor abre un temporizador invisible de **30 segundos**. 
+3. **Reconexión exitosa:** Si el jugador vuelve a abrir el WebSocket de la misma sala (`/ws/play/{game_id}`) antes de 30 segundos, el servidor le reenviará el `player_assignment` y el `game_state_update` actual para que siga jugando como si nada.
+4. **Abandono Definitivo:** Si pasan 30 segundos, el servidor declara "Abandono". Enviará un último `game_state_update` con `game_over: true` y la victoria asignada al jugador que permaneció en la sala. El ELO se restará al jugador desconectado.

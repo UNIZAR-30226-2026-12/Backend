@@ -275,7 +275,7 @@ async def get_user_history(user_id: int):
 
 async def get_user_history_data(user_id: int):
     query = """
-        SELECT id, created_at, mode, result, score, rank_change
+        SELECT id, created_at, mode, result, score, rank_change, opponent_name, player_color
         FROM game_history
         WHERE user_id = :uid
         ORDER BY created_at DESC
@@ -288,9 +288,11 @@ async def get_user_history_data(user_id: int):
         history.append(GameHistoryResponse(
             id=row["id"],
             date=row["created_at"].strftime("%Y-%m-%d"),
+            opponent_name=row["opponent_name"],
             mode=row["mode"],
             result=row["result"],
             score=row["score"],
             rankChange=row["rank_change"],
+            player_color=row["player_color"],
         ))
     return history

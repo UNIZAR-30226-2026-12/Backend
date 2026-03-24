@@ -1,16 +1,17 @@
 from fastapi import WebSocket
 from typing import Dict, List
+import asyncio
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.disconnect_timers: Dict[str, asyncio.Task] = {}  
 
     async def connect(self, websocket: WebSocket, game_id: str):
         await websocket.accept()
         if game_id not in self.active_connections:
             self.active_connections[game_id] = []
         
-        # Solo añadimos si no está ya (evita duplicados)
         if websocket not in self.active_connections[game_id]:
             self.active_connections[game_id].append(websocket)
             print(f"DEBUG: Conexión añadida a sala {game_id}. Total: {len(self.active_connections[game_id])}")
@@ -24,7 +25,6 @@ class ConnectionManager:
 
     async def broadcast_game_state(self, game_id: str, state: dict):
         if game_id in self.active_connections:
-            # Hacemos una copia de la lista para evitar errores de iteración
             for connection in list(self.active_connections[game_id]):
                 try:
                     await connection.send_json({
