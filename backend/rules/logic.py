@@ -70,19 +70,29 @@ def count_score(board: Board) -> Dict[str, int]:
         "white": sum(row.count('white') for row in board)
     }
 
-def resolve_game_state(board: Board, next_player: Player) -> Tuple[bool, Optional[str], Optional[Player], List[Coordinate]]:
-    moves = get_valid_moves(board, next_player)
-    if moves:
-        return False, None, next_player, moves
+def resolve_game_state(board: List[List[Optional[str]]], next_player: str) -> Tuple[bool, Optional[str], Optional[str], list]:
+    """
+    Evalúa el estado del tablero después de un movimiento.
+    Devuelve: (game_over, winner, current_player, valid_moves)
+    """
+    valid_moves_next = get_valid_moves(board, next_player)
     
-    other_player = 'white' if next_player == 'black' else 'black'
-    other_moves = get_valid_moves(board, other_player)
-    if other_moves:
-        return False, None, other_player, other_moves
+    if len(valid_moves_next) > 0:
+        return False, None, next_player, valid_moves_next
+
+    other_player = "white" if next_player == "black" else "black"
+    valid_moves_other = get_valid_moves(board, other_player)
     
-    # Si nadie puede mover, fin del juego
-    counts = count_score(board)
-    winner = 'draw'
-    if counts['black'] > counts['white']: winner = 'black'
-    elif counts['white'] > counts['black']: winner = 'white'
+    if len(valid_moves_other) > 0:
+        return False, None, other_player, valid_moves_other
+
+    score = count_score(board)
+    
+    if score["black"] > score["white"]:
+        winner = "black"
+    elif score["white"] > score["black"]:
+        winner = "white"
+    else:
+        winner = "draw" # Empate
+        
     return True, winner, None, []
