@@ -74,8 +74,13 @@ async def websocket_endpoint(
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
             
+            try:
+                message = json.loads(data)
+            except (json.JSONDecodeError, ValueError):
+                await manager.send_error(websocket, "Formato de mensaje invalido: se esperaba JSON")
+                continue
+
             if message.get("action") == "chat":
                 chat_msg = {
                     "type": "chat_message",

@@ -296,3 +296,44 @@ async def get_user_history_data(user_id: int):
             player_color=row["player_color"],
         ))
     return history
+
+@router.delete("/me")
+async def delete_my_account(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["id"]
+    username = current_user["username"]
+    
+    # 1. Borramos relaciones sociales (amistades y rechazos)
+    await database.execute(
+        "DELETE FROM friendships WHERE user_id = :uid OR friend_id = :uid", 
+        {"uid": user_id}
+    )
+    await database.execute(
+        "DELETE FROM friend_request_rejections WHERE sender_id = :uid OR receiver_id = :uid", 
+        {"uid": user_id}
+    )
+    
+    # 2. Borramos movimientos hechos por el jugador
+    await database.execute(
+        "DELETE FROM moves WHERE player_id = :uid", 
+        {"uid": user_id}
+    )
+    
+    # 3. Borramos las partidas en las que ha participado
+    await database.execute(
+        "DELETE FROM games WHERE player1_id = :uid OR player2_id = :uid OR player3_id = :uid OR player4_id = :uid", 
+        {"uid": user_id}
+    )
+    
+    # 4. Borramos su historial estadístico
+    await database.execute(
+        "DELETE FROM game_history WHERE user_id = :uid", 
+        {"uid": user_id}
+    )
+    
+    # 5. Finalmente, borramos al usuario (los lobbies se borran en cascada automáticamente)
+    await database.execute(
+        "DELETE FROM users WHERE id = :uid", 
+        {"uid": user_id}
+    )
+    
+    return {"status": "success", "message": f"Usuario {username} y todos sus datos han sido eliminados"}

@@ -23,16 +23,21 @@ class ConnectionManager:
             if not self.active_connections[game_id]:
                 del self.active_connections[game_id]
 
-    async def broadcast_game_state(self, game_id: str, state: dict):
+    async def broadcast(self, game_id: str, message: dict):
         if game_id in self.active_connections:
             for connection in list(self.active_connections[game_id]):
                 try:
-                    await connection.send_json({
-                        "type": "game_state_update",
-                        "payload": state
-                    })
+                    await connection.send_json(message)
                 except Exception as e:
-                    print(f"DEBUG: Error enviando a un socket: {e}")
+                    print(f"DEBUG: Error enviando a un socket en sala {game_id}: {e}")
+                    self.disconnect(connection, game_id)
+
+    async def broadcast_game_state(self, game_id: str, state: dict):
+        """Helper específico para estados de juego."""
+        await self.broadcast(game_id, {
+            "type": "game_state_update",
+            "payload": state
+        })
 
     async def send_error(self, websocket: WebSocket, message: str):
         await websocket.send_json({
