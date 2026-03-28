@@ -11,7 +11,14 @@ class GameManager:
     def __init__(self):
         self.active_games: Dict[str, dict] = {}
 
-    def create_game(self, creator_name: str, is_private: bool = False, game_id: str = None, mode: str = "1v1") -> str:
+    def create_game(
+        self,
+        creator_name: str,
+        is_private: bool = False,
+        game_id: str = None,
+        mode: str = "1v1",
+        invited_name: str = None,
+    ) -> str:
         if not game_id:
             game_id = str(uuid.uuid4())
         board = create_initial_board()
@@ -31,7 +38,11 @@ class GameManager:
             "db_game_id": None,
             "black_player": creator_name,
             "white_player": "IA" if mode == "vs_ai" else None,
-            "saved": False 
+            "saved": False,
+            "players_ready": {
+                creator_name: False,
+                **({"IA": True} if mode == "vs_ai" else {}),
+            },
         }
         return game_id
 
@@ -43,6 +54,31 @@ class GameManager:
 
     def get_game_state(self, game_id: str) -> dict:
         return self.active_games.get(game_id)
+
+    def remove_game(self, game_id: str):
+        if game_id in self.active_games:
+            del self.active_games[game_id]
+
+    def set_player_ready(self, game_id: str, username: str, ready: bool):
+        game = self.active_games.get(game_id)
+        if not game:
+            return
+        game.setdefault("players_ready", {})
+        game["players_ready"][username] = ready
+
+    def are_all_players_ready(self, game_id: str) -> bool:
+        game = self.active_games.get(game_id)
+        if not game:
+            return False
+        black_player = game.get("black_player")
+        white_player = game.get("white_player")
+        if not black_player or not white_player:
+            return False
+        if game.get("status") != "waiting":
+            return False
+
+        ready_map = game.get("players_ready", {})
+        return bool(ready_map.get(black_player) and ready_map.get(white_player))
 
     async def make_move(self, game_id: str, player: Player, row: int, col: int) -> tuple[bool, str]:
         game = self.active_games.get(game_id)
