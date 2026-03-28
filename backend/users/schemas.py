@@ -4,6 +4,9 @@ from typing import Optional
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+    password: Optional[str] = None
 
 class CustomizationUpdate(BaseModel):
     avatar_url: Optional[str] = None
