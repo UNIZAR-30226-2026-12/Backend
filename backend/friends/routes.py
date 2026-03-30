@@ -7,6 +7,64 @@ router = APIRouter()
 
 @router.get("/")
 async def list_friends(current_user: dict = Depends(get_current_user)):
+    await database.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lobby_invites (
+            id SERIAL PRIMARY KEY,
+            lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+            invited_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            invite_order INTEGER NOT NULL DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(lobby_id, invited_id)
+        )
+        """
+    )
+    await database.execute(
+        """
+        ALTER TABLE lobby_invites
+        ADD COLUMN IF NOT EXISTS invited_id INTEGER REFERENCES users(id) ON DELETE CASCADE
+        """
+    )
+    await database.execute(
+        """
+        ALTER TABLE lobby_invites
+        ADD COLUMN IF NOT EXISTS invited_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE
+        """
+    )
+    await database.execute(
+        """
+        UPDATE lobby_invites
+        SET invited_user_id = invited_id
+        WHERE invited_user_id IS NULL AND invited_id IS NOT NULL
+        """
+    )
+    await database.execute(
+        """
+        UPDATE lobby_invites
+        SET invited_id = invited_user_id
+        WHERE invited_id IS NULL AND invited_user_id IS NOT NULL
+        """
+    )
+    await database.execute(
+        """
+        ALTER TABLE lobby_invites
+        ADD COLUMN IF NOT EXISTS invite_order INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    await database.execute(
+        """
+        ALTER TABLE lobby_invites
+        ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        """
+    )
+    await database.execute(
+        """
+        ALTER TABLE lobby_invites
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        """
+    )
+
     # 1. Amigos aceptados
     query_friends = """
         SELECT u.id, u.username as name, u.elo as rr, u.avatar_url as avatar_url
@@ -27,10 +85,21 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     
     # 3. Invitaciones a juegos (de lobbies donde estamos invitados)
     query_game_invites = """
-        SELECT u.id, u.username as name, u.elo as rr, u.avatar_url as avatar_url, l.mode as gameMode, l.id as lobby_id
-        FROM users u
-        JOIN lobbies l ON l.creator_id = u.id
-        WHERE l.invited_id = :uid AND l.status = 'waiting'
+        SELECT
+            u.id,
+            u.username as name,
+            u.elo as rr,
+            u.avatar_url as avatar_url,
+            l.mode as gameMode,
+            l.id as lobby_id
+        FROM lobbies l
+        JOIN users u ON l.creator_id = u.id
+        JOIN lobby_invites li ON li.lobby_id = l.id
+        WHERE COALESCE(li.invited_id, li.invited_user_id) = :uid
+          AND li.status = 'pending'
+          AND l.status = 'waiting'
+          AND l.is_public = false
+        ORDER BY l.created_at DESC
     """
     game_invites_rows = await database.fetch_all(query=query_game_invites, values={"uid": current_user["id"]})
 

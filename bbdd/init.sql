@@ -55,6 +55,17 @@ CREATE TABLE lobbies (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Invitaciones por sala (soporta 1vs1 y 1vs1vs1vs1 con amigos)
+CREATE TABLE IF NOT EXISTS lobby_invites (
+    id SERIAL PRIMARY KEY,
+    lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+    invited_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    invite_order INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, accepted, left
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(lobby_id, invited_id)
+);
+
 -- Tabla de Partidas
 CREATE TABLE games (
     id SERIAL PRIMARY KEY,
