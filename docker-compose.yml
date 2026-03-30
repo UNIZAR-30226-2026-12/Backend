@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: reversi_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://postgres.wgxytzbccgerwfuovdaw:zcGEJSs8RK9sd@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require
+    ports:
+      - "8081:8000"
+
+  frontend:
+    build:
+      context: https://github.com/UNIZAR-30226-2026-12/Frontend-Web.git#main
+      dockerfile: Dockerfile
+    container_name: reversi_frontend
+    restart: always
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
