@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends
+﻿from fastapi import APIRouter, HTTPException, Depends
 from typing import List
+from collections import Counter
 from persistence.database import database
 from auth.dependencies import get_current_user
 from auth.schemas import UserResponse
@@ -13,6 +14,169 @@ from users.schemas import (
 )
 
 router = APIRouter()
+
+
+def _normalize_mode(mode: str) -> str:
+    normalized = (mode or "").strip().lower()
+    if normalized in {"1vs1", "1v1"}:
+        return "1vs1"
+    if normalized in {"1vs1vs1vs1", "1v1v1v1"}:
+        return "1vs1vs1vs1"
+    return normalized
+
+
+def _normalize_result(result: str) -> str:
+    return (result or "").replace("Ã‚Âº", "º").replace("Âº", "º").strip()
+
+
+def _placement_from_result(result: str):
+    normalized = _normalize_result(result)
+    if normalized and normalized[0].isdigit():
+        return int(normalized[0])
+    return None
+
+def _split_opponents(opponent_name: str) -> List[str]:
+    if not opponent_name:
+        return []
+    if opponent_name == "N/A":
+        return []
+    return [name.strip() for name in opponent_name.split(",") if name and name.strip()]
+
+
+def _top_counter_entry(counter: Counter):
+    if not counter:
+        return None, 0
+    name, value = counter.most_common(1)[0]
+    return name, value
+
+
+def _build_1v1_stats(rows: List[dict], elo: int, peak_elo: int) -> dict:
+    one_vs_one_rows = [row for row in rows if _normalize_mode(row["mode"]) == "1vs1"]
+    one_vs_one_rows.sort(key=lambda row: row["created_at"])
+
+    total = len(one_vs_one_rows)
+    wins = sum(1 for row in one_vs_one_rows if _normalize_result(row["result"]) == "Ganada")
+    losses = sum(1 for row in one_vs_one_rows if _normalize_result(row["result"]) == "Perdida")
+    draws = sum(1 for row in one_vs_one_rows if _normalize_result(row["result"]) == "Empate")
+    winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
+
+    win_streak = 0
+    current_streak = 0
+    for row in one_vs_one_rows:
+        if _normalize_result(row["result"]) == "Ganada":
+            current_streak += 1
+            win_streak = max(win_streak, current_streak)
+        else:
+            current_streak = 0
+
+    black_total = sum(1 for row in one_vs_one_rows if (row["player_color"] or "").lower() == "black")
+    black_wins = sum(
+        1
+        for row in one_vs_one_rows
+        if (row["player_color"] or "").lower() == "black" and _normalize_result(row["result"]) == "Ganada"
+    )
+    white_total = sum(1 for row in one_vs_one_rows if (row["player_color"] or "").lower() == "white")
+    white_wins = sum(
+        1
+        for row in one_vs_one_rows
+        if (row["player_color"] or "").lower() == "white" and _normalize_result(row["result"]) == "Ganada"
+    )
+
+    winrate_black = round((black_wins / black_total) * 100, 1) if black_total > 0 else 0.0
+    winrate_white = round((white_wins / white_total) * 100, 1) if white_total > 0 else 0.0
+
+    nemesis_counter = Counter(
+        row["opponent_name"]
+        for row in one_vs_one_rows
+        if _normalize_result(row["result"]) == "Perdida" and row["opponent_name"]
+    )
+    victim_counter = Counter(
+        row["opponent_name"]
+        for row in one_vs_one_rows
+        if _normalize_result(row["result"]) == "Ganada" and row["opponent_name"]
+    )
+    nemesis_name, nemesis_losses = _top_counter_entry(nemesis_counter)
+    victim_name, victim_wins = _top_counter_entry(victim_counter)
+
+    return {
+        "elo": elo,
+        "peak_elo": peak_elo,
+        "total_games": total,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "winrate": winrate,
+        "win_streak": win_streak,
+        "winrate_black": winrate_black,
+        "winrate_white": winrate_white,
+        "nemesis_name": nemesis_name,
+        "nemesis_losses": nemesis_losses,
+        "victim_name": victim_name,
+        "victim_wins": victim_wins,
+    }
+
+
+def _build_4p_stats(rows: List[dict], elo: int, peak_elo: int) -> dict:
+    four_player_rows = [row for row in rows if _normalize_mode(row["mode"]) == "1vs1vs1vs1"]
+    four_player_rows.sort(key=lambda row: row["created_at"])
+
+    rows_with_placement = [
+        (row, _placement_from_result(row["result"]))
+        for row in four_player_rows
+    ]
+    valid_rows = [(row, placement) for row, placement in rows_with_placement if placement in {1, 2, 3, 4}]
+
+    total = len(valid_rows)
+    first_place = sum(1 for _, placement in valid_rows if placement == 1)
+    second_place = sum(1 for _, placement in valid_rows if placement == 2)
+    third_place = sum(1 for _, placement in valid_rows if placement == 3)
+    fourth_place = sum(1 for _, placement in valid_rows if placement == 4)
+
+    wins = first_place
+    losses = max(0, total - first_place)
+    winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
+
+    win_streak = 0
+    current_streak = 0
+    for _, placement in valid_rows:
+        if placement == 1:
+            current_streak += 1
+            win_streak = max(win_streak, current_streak)
+        else:
+            current_streak = 0
+
+    nemesis_counter: Counter = Counter()
+    victim_counter: Counter = Counter()
+    for row, placement in valid_rows:
+        opponents = _split_opponents(row["opponent_name"] or "")
+        if placement == 1:
+            for opponent in opponents:
+                victim_counter[opponent] += 1
+        else:
+            for opponent in opponents:
+                nemesis_counter[opponent] += 1
+
+    nemesis_name, nemesis_losses = _top_counter_entry(nemesis_counter)
+    victim_name, victim_wins = _top_counter_entry(victim_counter)
+
+    return {
+        "elo": elo,
+        "peak_elo": peak_elo,
+        "total_games": total,
+        "wins": wins,
+        "losses": losses,
+        "draws": 0,
+        "winrate": winrate,
+        "win_streak": win_streak,
+        "first_place": first_place,
+        "second_place": second_place,
+        "third_place": third_place,
+        "fourth_place": fourth_place,
+        "nemesis_name": nemesis_name,
+        "nemesis_losses": nemesis_losses,
+        "victim_name": victim_name,
+        "victim_wins": victim_wins,
+    }
 
 
 @router.get("/me", response_model=UserResponse)
@@ -31,109 +195,42 @@ async def read_user_stats(user_id: int):
 
 
 async def get_user_statistics(user_id: int):
-    query = "SELECT elo, username, peak_elo FROM users WHERE id = :user_id"
+    query = "SELECT elo, username, peak_elo, avatar_url FROM users WHERE id = :user_id"
     user = await database.fetch_one(query=query, values={"user_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    # Estadísticas básicas
-    query_games = """
-        SELECT COUNT(*) as total,
-               SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins,
-               SUM(CASE WHEN result = 'Perdida' THEN 1 ELSE 0 END) as losses,
-               SUM(CASE WHEN result = 'Empate' THEN 1 ELSE 0 END) as draws
+    query_history = """
+        SELECT mode, result, opponent_name, player_color, created_at
         FROM game_history
-        WHERE user_id = :user_id
-    """
-    stats = await database.fetch_one(query=query_games, values={"user_id": user_id})
-
-    total = stats["total"] or 0
-    wins = stats["wins"] or 0
-    losses = stats["losses"] or 0
-    draws = stats["draws"] or 0
-    winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
-
-    # Mejor racha de victorias consecutivas
-    query_results = """
-        SELECT result FROM game_history
         WHERE user_id = :user_id
         ORDER BY created_at ASC
     """
-    rows = await database.fetch_all(query=query_results, values={"user_id": user_id})
-    win_streak = 0
-    current_streak = 0
-    for row in rows:
-        if row["result"] == "Ganada":
-            current_streak += 1
-            win_streak = max(win_streak, current_streak)
-        else:
-            current_streak = 0
+    rows = await database.fetch_all(query=query_history, values={"user_id": user_id})
 
-    # Winrate por color de ficha
-    query_color = """
-        SELECT player_color,
-               COUNT(*) as total,
-               SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins
-        FROM game_history
-        WHERE user_id = :user_id
-        GROUP BY player_color
-    """
-    color_rows = await database.fetch_all(query=query_color, values={"user_id": user_id})
-    winrate_black = 0.0
-    winrate_white = 0.0
-    for cr in color_rows:
-        if cr["total"] > 0:
-            wr = round((cr["wins"] / cr["total"]) * 100, 1)
-            if cr["player_color"] == "black":
-                winrate_black = wr
-            elif cr["player_color"] == "white":
-                winrate_white = wr
-
-    # Némesis: rival que más veces nos ha ganado
-    query_nemesis = """
-        SELECT opponent_name, COUNT(*) as cnt
-        FROM game_history
-        WHERE user_id = :user_id AND result = 'Perdida'
-        GROUP BY opponent_name
-        ORDER BY cnt DESC
-        LIMIT 1
-    """
-    nemesis_row = await database.fetch_one(query=query_nemesis, values={"user_id": user_id})
-    nemesis_name = nemesis_row["opponent_name"] if nemesis_row and nemesis_row["cnt"] > 0 else None
-    nemesis_losses = nemesis_row["cnt"] if nemesis_row else 0
-
-    # Víctima: rival al que más veces hemos ganado
-    query_victim = """
-        SELECT opponent_name, COUNT(*) as cnt
-        FROM game_history
-        WHERE user_id = :user_id AND result = 'Ganada'
-        GROUP BY opponent_name
-        ORDER BY cnt DESC
-        LIMIT 1
-    """
-    victim_row = await database.fetch_one(query=query_victim, values={"user_id": user_id})
-    victim_name = victim_row["opponent_name"] if victim_row and victim_row["cnt"] > 0 else None
-    victim_wins = victim_row["cnt"] if victim_row else 0
-
-    # Pico de RR
     peak_elo = user["peak_elo"] if user["peak_elo"] is not None else user["elo"]
+    stats_1v1 = _build_1v1_stats(rows, user["elo"], peak_elo)
+    stats_4p = _build_4p_stats(rows, user["elo"], peak_elo)
 
     return {
         "username": user["username"],
         "elo": user["elo"],
-        "total_games": total,
-        "wins": wins,
-        "losses": losses,
-        "draws": draws,
-        "winrate": winrate,
+        "avatar_url": user["avatar_url"],
+        "total_games": stats_1v1["total_games"],
+        "wins": stats_1v1["wins"],
+        "losses": stats_1v1["losses"],
+        "draws": stats_1v1["draws"],
+        "winrate": stats_1v1["winrate"],
         "peak_elo": peak_elo,
-        "win_streak": win_streak,
-        "winrate_black": winrate_black,
-        "winrate_white": winrate_white,
-        "nemesis_name": nemesis_name,
-        "nemesis_losses": nemesis_losses,
-        "victim_name": victim_name,
-        "victim_wins": victim_wins,
+        "win_streak": stats_1v1["win_streak"],
+        "winrate_black": stats_1v1["winrate_black"],
+        "winrate_white": stats_1v1["winrate_white"],
+        "nemesis_name": stats_1v1["nemesis_name"],
+        "nemesis_losses": stats_1v1["nemesis_losses"],
+        "victim_name": stats_1v1["victim_name"],
+        "victim_wins": stats_1v1["victim_wins"],
+        "stats_1v1": stats_1v1,
+        "stats_4p": stats_4p,
     }
 
 
@@ -147,21 +244,58 @@ async def read_h2h(user_id: int, current_user: dict = Depends(get_current_user))
     friend_name = friend["username"]
 
     query_h2h = """
-        SELECT 
-            COUNT(*) as total_matches,
-            SUM(CASE WHEN result = 'Ganada' THEN 1 ELSE 0 END) as wins,
-            SUM(CASE WHEN result = 'Perdida' THEN 1 ELSE 0 END) as losses,
-            SUM(CASE WHEN result = 'Empate' THEN 1 ELSE 0 END) as draws
+        SELECT mode, result, opponent_name
         FROM game_history
-        WHERE user_id = :uid AND opponent_name = :opp_name
+        WHERE user_id = :uid
     """
-    stats = await database.fetch_one(query=query_h2h, values={"uid": current_user["id"], "opp_name": friend_name})
+    rows = await database.fetch_all(query=query_h2h, values={"uid": current_user["id"]})
+
+    total_matches = 0
+    wins = 0
+    losses = 0
+    draws = 0
+
+    total_matches_4p = 0
+    first_places_4p = 0
+    other_places_4p = 0
+
+    for row in rows:
+        mode = _normalize_mode(row["mode"])
+        opponent_name = (row["opponent_name"] or "").strip()
+
+        if mode == "1vs1":
+            if opponent_name != friend_name:
+                continue
+            total_matches += 1
+            result = _normalize_result(row["result"])
+            if result == "Ganada":
+                wins += 1
+            elif result == "Perdida":
+                losses += 1
+            elif result == "Empate":
+                draws += 1
+            continue
+
+        if mode == "1vs1vs1vs1":
+            opponents = _split_opponents(opponent_name)
+            if friend_name not in opponents:
+                continue
+            placement = _placement_from_result(row["result"])
+            if placement == 1:
+                total_matches_4p += 1
+                first_places_4p += 1
+            elif placement in {2, 3, 4}:
+                total_matches_4p += 1
+                other_places_4p += 1
 
     return {
-        "total_matches": stats["total_matches"] if stats and stats["total_matches"] else 0,
-        "wins": stats["wins"] if stats and stats["wins"] else 0,
-        "losses": stats["losses"] if stats and stats["losses"] else 0,
-        "draws": stats["draws"] if stats and stats["draws"] else 0,
+        "total_matches": total_matches,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "total_matches_4p": total_matches_4p,
+        "first_places_4p": first_places_4p,
+        "other_places_4p": other_places_4p,
     }
 
 
@@ -175,33 +309,33 @@ async def update_user_me(update: UserUpdate, current_user: dict = Depends(get_cu
     if update.username is not None:
         normalized_username = update.username.strip()
         if not normalized_username:
-            raise HTTPException(status_code=400, detail="El nombre de usuario no puede estar vacío")
+            raise HTTPException(status_code=400, detail="El nombre de usuario no puede estar vacÃ­o")
 
         query_check = "SELECT id FROM users WHERE username = :un AND id != :uid"
         existing = await database.fetch_one(query=query_check, values={"un": normalized_username, "uid": current_user["id"]})
         if existing:
-            raise HTTPException(status_code=400, detail="Este nombre de usuario ya está registrado")
+            raise HTTPException(status_code=400, detail="Este nombre de usuario ya estÃ¡ registrado")
         username = normalized_username
 
     if update.email is not None:
         normalized_email = update.email.strip()
         if not normalized_email:
-            raise HTTPException(status_code=400, detail="El correo electrónico no puede estar vacío")
+            raise HTTPException(status_code=400, detail="El correo electrÃ³nico no puede estar vacÃ­o")
         query_check = "SELECT id FROM users WHERE email = :em AND id != :uid"
         existing = await database.fetch_one(query=query_check, values={"em": normalized_email, "uid": current_user["id"]})
         if existing:
-            raise HTTPException(status_code=400, detail="Este correo electrónico ya está registrado")
+            raise HTTPException(status_code=400, detail="Este correo electrÃ³nico ya estÃ¡ registrado")
         email = normalized_email
 
     if new_password is not None:
         if not update.current_password:
-            raise HTTPException(status_code=400, detail="Debes indicar la contraseña actual para cambiarla")
+            raise HTTPException(status_code=400, detail="Debes indicar la contraseÃ±a actual para cambiarla")
         if not verify_password(update.current_password, current_user["password_hash"]):
-            raise HTTPException(status_code=400, detail="La contraseña actual no es correcta")
+            raise HTTPException(status_code=400, detail="La contraseÃ±a actual no es correcta")
 
         cleaned_new_password = new_password.strip()
         if len(cleaned_new_password) < 6:
-            raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 6 caracteres")
+            raise HTTPException(status_code=400, detail="La nueva contraseÃ±a debe tener al menos 6 caracteres")
 
         new_password_hash = get_password_hash(cleaned_new_password)
 
@@ -361,16 +495,20 @@ async def delete_my_account(current_user: dict = Depends(get_current_user)):
         {"uid": user_id},
     )
 
-    # 4. Borramos su historial estadístico
+    # 4. Borramos su historial estadÃ­stico
     await database.execute(
         "DELETE FROM game_history WHERE user_id = :uid",
         {"uid": user_id},
     )
 
-    # 5. Finalmente, borramos al usuario (los lobbies se borran en cascada automáticamente)
+    # 5. Finalmente, borramos al usuario (los lobbies se borran en cascada automÃ¡ticamente)
     await database.execute(
         "DELETE FROM users WHERE id = :uid",
         {"uid": user_id},
     )
 
     return {"status": "success", "message": f"Usuario {username} y todos sus datos han sido eliminados"}
+
+
+
+

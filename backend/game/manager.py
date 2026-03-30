@@ -454,29 +454,18 @@ class GameManager:
 
         black_user = await get_user_data(black_name)
         white_user = await get_user_data(white_name)
-
-        black_elo = black_user["elo"] if black_user else 1000
-        white_elo = white_user["elo"] if white_user else 1000
-
-        expected_black = 1 / (1 + 10 ** ((white_elo - black_elo) / 400))
-        expected_white = 1 / (1 + 10 ** ((black_elo - white_elo) / 400))
-
-        k_factor = 32
-
         if winner_color == "black":
-            s_black, s_white = 1, 0
             res_black, res_white = "Ganada", "Perdida"
+            black_change, white_change = 30, -30
         elif winner_color == "white":
-            s_black, s_white = 0, 1
             res_black, res_white = "Perdida", "Ganada"
+            black_change, white_change = -30, 30
         else:
-            s_black, s_white = 0.5, 0.5
             res_black, res_white = "Empate", "Empate"
-
-        black_change = int(k_factor * (s_black - expected_black)) if black_user else 0
-        white_change = int(k_factor * (s_white - expected_white)) if white_user else 0
+            black_change, white_change = 0, 0
 
         if black_user:
+            black_elo = black_user["elo"]
             new_elo = black_elo + black_change
             await database.execute(
                 "UPDATE users SET elo = :elo, peak_elo = GREATEST(COALESCE(peak_elo, elo), :elo) WHERE id = :uid",
@@ -498,6 +487,7 @@ class GameManager:
             )
 
         if white_user:
+            white_elo = white_user["elo"]
             new_elo = white_elo + white_change
             await database.execute(
                 "UPDATE users SET elo = :elo, peak_elo = GREATEST(COALESCE(peak_elo, elo), :elo) WHERE id = :uid",
