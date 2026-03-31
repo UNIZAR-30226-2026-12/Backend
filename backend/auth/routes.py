@@ -1,11 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordRequestForm
-from datetime import timedelta
+from datetime import datetime, timedelta
+import random
+import string
 from persistence.database import database
-from auth.schemas import UserCreate, UserResponse, Token
+from auth.schemas import UserCreate, UserResponse, Token, ForgotPasswordRequest, ResetPasswordRequest
 from auth.security import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from auth.email_service import send_reset_email
 
 router = APIRouter()
+
+# Almacén temporal de códigos de reset: {email: {"code": str, "expires": datetime}}
+reset_codes: dict = {}
 
 @router.post("/register", response_model=UserResponse)
 async def register(user: UserCreate):
@@ -50,3 +56,52 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    email = request.email.strip().lower()
+
+    query = "SELECT id FROM users WHERE email = :email"
+    user = await database.fetch_one(query=query, values={"email": email})
+
+    if not user:
+        raise HTTPException(status_code=404, detail="No hay ninguna cuenta asociada a este correo electrónico")
+
+    code = ''.join(random.choices(string.digits, k=6))
+    reset_codes[email] = {
+        "code": code,
+        "expires": datetime.utcnow() + timedelta(minutes=15)
+    }
+
+    try:
+        await send_reset_email(email, code)
+    except Exception as e:
+        del reset_codes[email]
+        raise HTTPException(status_code=500, detail=f"Error al enviar el correo: {str(e)}")
+
+    return {"message": "Correo de recuperación enviado"}
+
+
+@router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    email = request.email.strip().lower()
+
+    stored = reset_codes.get(email)
+    if not stored:
+        raise HTTPException(status_code=400, detail="No se ha solicitado un restablecimiento para este correo")
+
+    if datetime.utcnow() > stored["expires"]:
+        del reset_codes[email]
+        raise HTTPException(status_code=400, detail="El código ha expirado. Solicita uno nuevo")
+
+    if stored["code"] != request.code.strip():
+        raise HTTPException(status_code=400, detail="Código incorrecto")
+
+    hashed_password = get_password_hash(request.new_password)
+    query = "UPDATE users SET password_hash = :pw WHERE email = :email"
+    await database.execute(query=query, values={"pw": hashed_password, "email": email})
+
+    del reset_codes[email]
+
+    return {"message": "Contraseña restablecida correctamente"}
