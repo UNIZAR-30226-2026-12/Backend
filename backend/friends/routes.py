@@ -1,12 +1,55 @@
 from fastapi import APIRouter, HTTPException, Depends
 from persistence.database import database
 from auth.dependencies import get_current_user
-from friends.schemas import FriendRequest
+from friends.schemas import FriendRequest, ChatMessageCreate
 
 router = APIRouter()
 
+async def ensure_friend_chat_table():
+    await database.execute(
+        """
+        CREATE TABLE IF NOT EXISTS friend_messages (
+            id SERIAL PRIMARY KEY,
+            sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            message TEXT NOT NULL,
+            is_read BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    await database.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_friend_messages_pair_created_at
+        ON friend_messages (sender_id, receiver_id, created_at)
+        """
+    )
+    await database.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_friend_messages_receiver_unread
+        ON friend_messages (receiver_id, is_read)
+        """
+    )
+
+
+async def assert_accepted_friendship(current_user_id: int, friend_id: int):
+    friendship = await database.fetch_one(
+        """
+        SELECT 1
+        FROM friendships
+        WHERE status = 'accepted'
+          AND ((user_id = :uid AND friend_id = :fid) OR (user_id = :fid AND friend_id = :uid))
+        LIMIT 1
+        """,
+        values={"uid": current_user_id, "fid": friend_id},
+    )
+    if not friendship:
+        raise HTTPException(status_code=403, detail="Solo puedes chatear con amigos aceptados")
+
+
 @router.get("/")
 async def list_friends(current_user: dict = Depends(get_current_user)):
+    await ensure_friend_chat_table()
     await database.execute(
         """
         CREATE TABLE IF NOT EXISTS lobby_invites (
@@ -67,7 +110,18 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
 
     # 1. Amigos aceptados
     query_friends = """
-        SELECT u.id, u.username as name, u.elo as rr, u.avatar_url as avatar_url
+        SELECT
+            u.id,
+            u.username as name,
+            u.elo as rr,
+            u.avatar_url as avatar_url,
+            COALESCE((
+                SELECT COUNT(*)
+                FROM friend_messages fm
+                WHERE fm.sender_id = u.id
+                  AND fm.receiver_id = :uid
+                  AND fm.is_read = false
+            ), 0) AS unread_count
         FROM users u
         JOIN friendships f ON (f.friend_id = u.id AND f.user_id = :uid) OR (f.user_id = u.id AND f.friend_id = :uid)
         WHERE f.status = 'accepted'
@@ -170,3 +224,87 @@ async def reject_friend_request(user_id: int, current_user: dict = Depends(get_c
 @router.delete("/{user_id}")
 async def delete_friend(user_id: int, current_user: dict = Depends(get_current_user)):
     return await reject_friend_request(user_id, current_user)
+
+
+@router.get("/{user_id}/chat")
+async def get_friend_chat(user_id: int, current_user: dict = Depends(get_current_user)):
+    await ensure_friend_chat_table()
+    if user_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="No puedes abrir un chat contigo mismo")
+
+    await assert_accepted_friendship(current_user["id"], user_id)
+
+    rows = await database.fetch_all(
+        """
+        SELECT
+            fm.id,
+            fm.sender_id,
+            su.username AS sender_name,
+            fm.receiver_id,
+            ru.username AS receiver_name,
+            fm.message,
+            fm.is_read,
+            fm.created_at
+        FROM friend_messages fm
+        JOIN users su ON su.id = fm.sender_id
+        JOIN users ru ON ru.id = fm.receiver_id
+        WHERE (fm.sender_id = :uid AND fm.receiver_id = :fid)
+           OR (fm.sender_id = :fid AND fm.receiver_id = :uid)
+        ORDER BY fm.created_at ASC, fm.id ASC
+        """,
+        values={"uid": current_user["id"], "fid": user_id},
+    )
+
+    return {"messages": [dict(row) for row in rows]}
+
+
+@router.post("/{user_id}/chat")
+async def send_friend_chat_message(
+    user_id: int,
+    payload: ChatMessageCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    await ensure_friend_chat_table()
+    if user_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="No puedes enviarte mensajes a ti mismo")
+
+    await assert_accepted_friendship(current_user["id"], user_id)
+
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacio")
+    if len(message) > 1000:
+        raise HTTPException(status_code=400, detail="El mensaje es demasiado largo (maximo 1000 caracteres)")
+
+    row = await database.fetch_one(
+        """
+        INSERT INTO friend_messages (sender_id, receiver_id, message, is_read)
+        VALUES (:uid, :fid, :message, false)
+        RETURNING id, sender_id, receiver_id, message, is_read, created_at
+        """,
+        values={"uid": current_user["id"], "fid": user_id, "message": message},
+    )
+
+    return {"message": dict(row)}
+
+
+@router.post("/{user_id}/chat/read")
+async def mark_friend_chat_as_read(user_id: int, current_user: dict = Depends(get_current_user)):
+    await ensure_friend_chat_table()
+    if user_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="Operacion invalida")
+
+    await assert_accepted_friendship(current_user["id"], user_id)
+
+    await database.execute(
+        """
+        UPDATE friend_messages
+        SET is_read = true
+        WHERE sender_id = :fid
+          AND receiver_id = :uid
+          AND is_read = false
+        """,
+        values={"uid": current_user["id"], "fid": user_id},
+    )
+
+    return {"message": "Mensajes marcados como leidos"}

@@ -8,3 +8,7 @@ class FriendResponse(BaseModel):
 
 class FriendRequest(BaseModel):
     username: str
+
+
+class ChatMessageCreate(BaseModel):
+    message: str
