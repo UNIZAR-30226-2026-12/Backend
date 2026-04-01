@@ -9,8 +9,9 @@ services:
     restart: always
     environment:
       DATABASE_URL: postgresql://postgres.wgxytzbccgerwfuovdaw:zcGEJSs8RK9sd@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require
-    ports:
-      - "8081:8000"
+    # No exponemos puertos directamente al exterior; Nginx hará de proxy
+    # ports:
+    #   - "8081:8000"
 
   frontend:
     build:
