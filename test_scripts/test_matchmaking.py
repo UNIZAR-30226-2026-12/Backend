@@ -14,6 +14,9 @@ import requests
 import json
 import uuid
 import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
+from game.manager import GameManager
 
 BASE_URL = "http://localhost:8081"
 WS_URL   = "ws://localhost:8081"
@@ -56,17 +59,52 @@ def delete_user(token, username):
     else:
         print(f"   [Limpieza] ATENCION — No se pudo eliminar '{username}': {res.text}")
 
+def get_user_id(token):
+    return requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {token}"}).json()["id"]
+
+def create_and_login(username, password="password123"):
+    email = f"{username}@test.com"
+    requests.post(f"{BASE_URL}/api/auth/register", json={"username": username, "email": email, "password": password})
+    return requests.post(f"{BASE_URL}/api/auth/login", data={"username": username, "password": password}).json()["access_token"]
+
+def get_random_users(count):
+    users = []
+    tokens = []
+    ids = []
+    for _ in range(count):
+        u = f"u4p_{uuid.uuid4().hex[:4]}"
+        t = create_and_login(u)
+        users.append(u)
+        tokens.append(t)
+        ids.append(get_user_id(t))
+    return users, tokens, ids
+
+async def wait_for_game_update(ws, timeout=3.0):
+    for _ in range(10):
+        msg = await safe_recv(ws, timeout=timeout)
+        if msg and msg.get("type") == "game_state_update":
+            return msg
+    return None
+
 async def safe_recv(ws, label="WS", timeout=5.0):
     try:
-        raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-        data = json.loads(raw)
-        debug(f"[{label}] recibe tipo='{data.get('type')}' | payload={str(data.get('payload',''))[:120]}")
-        return data
-    except asyncio.TimeoutError:
-        debug(f"[{label}] TIMEOUT tras {timeout}s — sin mensaje")
-        return None
-    except Exception as e:
-        debug(f"[{label}] Error al recibir: {e}")
+        while True:
+            msg = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            data = json.loads(msg)
+            tipo = data.get("type")
+            
+            # Magia: Si el server nos pone en espera, enviamos "Ready" automaticamente
+            if tipo == "waiting_for_player":
+                await ws.send(json.dumps({"action": "set_ready", "ready": True}))
+                continue
+                
+            # Ignoramos la sincronizacion del lobby para que los asserts antiguos no fallen
+            if tipo == "room_sync":
+                continue
+                
+            print(f"         · DEBUG: [{label}] tipo='{tipo}' | payload={str(data.get('payload'))[:100]}")
+            return data
+    except Exception:
         return None
 
 # ─────────────────────────────────────────────
@@ -94,7 +132,7 @@ def run_lobby_test():
         res_create = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res_create.status_code == 200, \
             f"HTTP {res_create.status_code}: {res_create.text}"
@@ -196,10 +234,13 @@ async def run_friendly_invite_test():
                    websockets.connect(ws_url_2) as notif2:
 
             step(3, f"'{u1}' invita a '{u2}' a jugar (POST /api/games/invite)...")
-            res_inv = requests.post(
-                f"{BASE_URL}/api/games/invite?target_username={u2}",
-                headers={"Authorization": f"Bearer {t1}"}
-            )
+            requests.post(f"{BASE_URL}/api/friends/request", json={"username": u2}, headers={"Authorization": f"Bearer {t1}"})
+            data_friends = requests.get(f"{BASE_URL}/api/friends", headers={"Authorization": f"Bearer {t2}"}).json()
+            peticion = next((r for r in data_friends['requests'] if (r.get('name') or r.get('username')) == u1), None)
+            requests.post(f"{BASE_URL}/api/friends/{peticion['id']}/accept", headers={"Authorization": f"Bearer {t2}"})
+
+            target_id = requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {t2}"}).json()["id"]
+            res_inv = requests.post(f"{BASE_URL}/api/games/invite", json={"friend_ids": [target_id], "mode": "1vs1"}, headers={"Authorization": f"Bearer {t1}"})
             assert res_inv.status_code == 200, \
                 f"HTTP {res_inv.status_code}: {res_inv.text}"
             game_id = res_inv.json().get("game_id")
@@ -242,7 +283,6 @@ async def run_friendly_invite_test():
                 assert asig1 and asig1.get("type") == "player_assignment", \
                     f"No se recibio player_assignment para '{u1}': {asig1}"
                 debug(f"Color asignado a '{u1}': {asig1.get('payload', {}).get('color')}")
-                await safe_recv(play1, label=f"play-{u1}")  # Estado "esperando"
 
                 async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as play2:
                     asig2 = await safe_recv(play2, label=f"play-{u2}")
@@ -250,8 +290,10 @@ async def run_friendly_invite_test():
                         f"No se recibio player_assignment para '{u2}': {asig2}"
                     debug(f"Color asignado a '{u2}': {asig2.get('payload', {}).get('color')}")
 
-                    tablero1 = await safe_recv(play1, label=f"tablero-{u1}")
-                    tablero2 = await safe_recv(play2, label=f"tablero-{u2}")
+                    tablero1, tablero2 = await asyncio.gather(
+                        safe_recv(play1, label=f"tablero-{u1}"),
+                        safe_recv(play2, label=f"tablero-{u2}")
+                    )
 
                     assert tablero1 and tablero1.get("type") == "game_state_update", \
                         f"'{u1}' no recibio el tablero inicial: {tablero1}"
@@ -312,7 +354,7 @@ async def run_chat_test():
         res_c = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res_c.status_code == 200, f"HTTP {res_c.status_code}: {res_c.text}"
         game_id = res_c.json()["game_id"]
@@ -382,15 +424,147 @@ async def run_chat_test():
 
 
 # ─────────────────────────────────────────────
+#  BLOQUE 4: MATCHMAKING Y SALAS DE ESPERA (4P)
+# ─────────────────────────────────────────────
+
+async def run_4p_matchmaking_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 4: MATCHMAKING Y SALAS DE ESPERA (4P)")
+    print("="*60)
+    users, tokens, ids = get_random_users(4)
+    host_t, g1_t, g2_t, g3_t = tokens
+    try:
+        step(1, "Lobby Publico: Creando sala 1v1v1v1...")
+        res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {host_t}"}, json={"mode": "1v1v1v1"})
+        game_id = res.json()["game_id"]
+        
+        lobbies = requests.get(f"{BASE_URL}/api/games/public").json().get("lobbies", [])
+        assert any(str(l["game_id"]) == str(game_id) for l in lobbies), "La sala publica 4P no es visible en el lobby"
+        ok("Sala creada y visible en el lobby publico")
+
+        step(2, "Llenado progresivo: uniendo a Jugador 2 y 3...")
+        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {g1_t}"})
+        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {g2_t}"})
+        
+        lobbies = requests.get(f"{BASE_URL}/api/games/public").json().get("lobbies", [])
+        assert any(str(l["game_id"]) == str(game_id) for l in lobbies), "La sala desaparecio prematuramente del lobby publico"
+        ok("La sala sigue visible con 3/4 jugadores")
+
+        step(3, "Jugador 4 se une, verificando que desaparezca del lobby...")
+        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {g3_t}"})
+        lobbies = requests.get(f"{BASE_URL}/api/games/public").json().get("lobbies", [])
+        assert not any(str(l["game_id"]) == str(game_id) for l in lobbies), "La sala llena sigue en el lobby"
+        ok("Sala llena retirada del lobby correctamente")
+
+        step(4, "Invitaciones Privadas Multiples...")
+        for u in users[1:]:
+            requests.post(f"{BASE_URL}/api/friends/request", json={"username": u}, headers={"Authorization": f"Bearer {host_t}"})
+            
+        for g_t in [g1_t, g2_t, g3_t]:
+            data_friends = requests.get(f"{BASE_URL}/api/friends", headers={"Authorization": f"Bearer {g_t}"}).json()
+            peticion = next((r for r in data_friends.get('requests', []) if (r.get('name') or r.get('username')) == users[0]), None)
+            if peticion:
+                requests.post(f"{BASE_URL}/api/friends/{peticion['id']}/accept", headers={"Authorization": f"Bearer {g_t}"})
+
+        async with websockets.connect(f"{WS_URL}/ws/notifications?token={host_t}") as ws_notif:
+            inv_res = requests.post(f"{BASE_URL}/api/games/invite", headers={"Authorization": f"Bearer {host_t}"}, json={
+                "mode": "1vs1vs1vs1", "friend_ids": ids[1:]
+            })
+            assert inv_res.status_code == 200, f"Error invitando: {inv_res.text}"
+            priv_game_id = inv_res.json()["game_id"]
+            ok(f"Invitacion multiple enviada a 3 amigos")
+
+            step(5, "Aceptacion asincrona...")
+            requests.post(f"{BASE_URL}/api/games/{priv_game_id}/accept", headers={"Authorization": f"Bearer {g1_t}"})
+            notif1 = await safe_recv(ws_notif, timeout=2.0)
+            assert notif1 and notif1.get("payload", {}).get("action") == "accepted"
+            ok("Host recibio notificacion individual de aceptacion")
+
+            step(6, "Rechazo de invitacion (cierra la sala)...")
+            requests.post(f"{BASE_URL}/api/games/{priv_game_id}/reject", headers={"Authorization": f"Bearer {g2_t}"})
+            notif2 = await safe_recv(ws_notif, timeout=2.0)
+            assert notif2 and notif2.get("payload", {}).get("action") == "rejected"
+            ok("Jugador 3 rechaza. Host notificado y sala invalidada.")
+
+        print("\n  ✔ BLOQUE 4 PASADO: Matchmaking 4P OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 4 FALLIDO: {e}")
+        return False
+    finally:
+        for t, u in zip(tokens, users): delete_user(t, u)
+
+
+# ─────────────────────────────────────────────
+#  BLOQUE 5: SINCRONIZACION Y PREPARACION (4P)
+# ─────────────────────────────────────────────
+
+async def run_4p_sync_chat_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 5: SINCRONIZACION Y PREPARACION (4P)")
+    print("="*60)
+    users, tokens, ids = get_random_users(4)
+    try:
+        step(1, "Creando sala y asignando 4 colores...")
+        res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {tokens[0]}"}, json={"mode": "1v1v1v1"})
+        game_id = res.json()["game_id"]
+        for t in tokens[1:]: requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t}"})
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[0]}") as ws0, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[1]}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[2]}") as ws2, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[3]}") as ws3:
+
+            colores = []
+            for ws in [ws0, ws1, ws2, ws3]:
+                msg = await safe_recv(ws)
+                if msg and msg.get("type") == "player_assignment":
+                    colores.append(msg["payload"]["color"])
+            
+            assert set(colores) == {"black", "white", "red", "blue"}, f"Colores asignados erroneos: {colores}"
+            ok("Colores unicos asignados (black, white, red, blue)")
+
+            step(2, "El Ready Parcial...")
+            await ws0.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+
+            msg_test = await wait_for_game_update(ws0)
+            if msg_test: raise AssertionError("La partida empezo con solo 3 listos!")
+            ok("La partida sigue 'waiting' con 3 jugadores listos")
+
+            await ws3.send(json.dumps({"action": "set_ready", "ready": True}))
+            estados = await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
+            assert all(e["payload"]["status"] == "playing" for e in estados if e), "El estado no cambio a playing"
+            ok("La partida comenzo al estar los 4 ready")
+
+            step(3, "Chat Multijugador...")
+            await ws0.send(json.dumps({"action": "chat", "message": "Hola a todos"}))
+            chat_msgs = await asyncio.gather(safe_recv(ws1), safe_recv(ws2), safe_recv(ws3))
+            assert all(c and c.get("type") == "chat_message" for c in chat_msgs), "Fallo la propagacion del chat"
+            ok("Mensaje de chat recibido por los 3 contrincantes concurrentemente")
+
+        print("\n  ✔ BLOQUE 5 PASADO: Sincronizacion OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 5 FALLIDO: {e}")
+        return False
+    finally:
+        for t, u in zip(tokens, users): delete_user(t, u)
+
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
 async def async_main():
     results = {}
 
-    results["Lobby publico y gestion de salas"]     = run_lobby_test()
-    results["Invitacion amistosa (duelos)"]          = await run_friendly_invite_test()
-    results["Chat bidireccional en partida"]         = await run_chat_test()
+    results["Lobby publico y gestion de salas"]       = run_lobby_test()
+    results["Invitacion amistosa (duelos)"]           = await run_friendly_invite_test()
+    results["Chat bidireccional en partida"]          = await run_chat_test()
+    results["Matchmaking y Salas de Espera (4P)"]     = await run_4p_matchmaking_test()
+    results["Sincronizacion y Chat (4P)"]             = await run_4p_sync_chat_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")

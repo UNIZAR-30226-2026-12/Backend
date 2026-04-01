@@ -15,6 +15,9 @@ import requests
 import json
 import uuid
 import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
+from game.manager import GameManager
 
 BASE_URL = "http://localhost:8081"
 WS_URL   = "ws://localhost:8081"
@@ -63,21 +66,61 @@ def delete_user(token, username):
     else:
         print(f"   [Limpieza] ATENCION — No se pudo eliminar '{username}': {res.text}")
 
+def get_user_id(token):
+    return requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {token}"}).json()["id"]
+
+def create_and_login(username, password="password123"):
+    email = f"{username}@test.com"
+    requests.post(f"{BASE_URL}/api/auth/register", json={"username": username, "email": email, "password": password})
+    return requests.post(f"{BASE_URL}/api/auth/login", data={"username": username, "password": password}).json()["access_token"]
+
+def get_random_users(count):
+    users = []
+    tokens = []
+    ids = []
+    for _ in range(count):
+        u = f"u4p_{uuid.uuid4().hex[:4]}"
+        t = create_and_login(u)
+        users.append(u)
+        tokens.append(t)
+        ids.append(get_user_id(t))
+    return users, tokens, ids
+
+async def wait_for_game_update(ws, timeout=4.0):
+    for _ in range(10):
+        msg = await safe_recv(ws, timeout=timeout)
+        if msg and msg.get("type") == "game_state_update":
+            return msg
+    return None
+
+async def wait_for_board(ws, timeout=3.0):
+    # Lee mensajes hasta encontrar el estado real del juego ignorando el lobby
+    for _ in range(10):
+        msg = await safe_recv(ws, timeout=timeout)
+        if msg and msg.get("type") == "game_state_update":
+            return msg
+    return None
+
 async def safe_recv(ws, label="WS", timeout=5.0):
     try:
-        raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-        data = json.loads(raw)
-        tipo = data.get("type", "?")
-        payload_preview = str(data.get("payload", ""))[:150]
-        debug(f"[{label}] tipo='{tipo}' | payload={payload_preview}")
-        return data
-    except asyncio.TimeoutError:
-        debug(f"[{label}] TIMEOUT ({timeout}s) — sin mensaje")
+        while True:
+            msg = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            data = json.loads(msg)
+            tipo = data.get("type")
+            
+            # Magia: Si el server nos pone en espera, enviamos "Ready" automaticamente
+            if tipo == "waiting_for_player":
+                await ws.send(json.dumps({"action": "set_ready", "ready": True}))
+                continue
+                
+            # Ignoramos la sincronizacion del lobby para que los asserts antiguos no fallen
+            if tipo == "room_sync":
+                continue
+                
+            print(f"         · DEBUG: [{label}] tipo='{tipo}' | payload={str(data.get('payload'))[:100]}")
+            return data
+    except Exception:
         return None
-    except Exception as e:
-        debug(f"[{label}] Error: {e}")
-        return None
-
 
 # ─────────────────────────────────────────────
 #  BLOQUE 1: PARTIDA VS IA
@@ -195,13 +238,14 @@ async def run_board_sync_test():
         res_c = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res_c.status_code == 200, f"HTTP {res_c.status_code}: {res_c.text}"
         game_id = res_c.json()["game_id"]
         debug(f"Sala creada: '{game_id}'")
 
         async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1:
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
             await safe_recv(ws1, label=f"asig-{u1}")    # player_assignment
             await safe_recv(ws1, label=f"wait-{u1}")    # esperando rival
 
@@ -210,6 +254,7 @@ async def run_board_sync_test():
             debug(f"'{u2}' se unio a la sala via HTTP")
 
             async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+                await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
                 await safe_recv(ws2, label=f"asig-{u2}")   # player_assignment
 
                 step(3, "Verificando sincronizacion del tablero inicial...")
@@ -284,7 +329,7 @@ async def run_rules_security_test():
         res = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res.status_code == 200, f"HTTP {res.status_code}: {res.text}"
         game_id = res.json()["game_id"]
@@ -294,6 +339,8 @@ async def run_rules_security_test():
 
         async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1, \
                    websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
 
             # Consumir asignaciones e inicio
             await safe_recv(ws1, label=f"asig-{u1}")
@@ -408,7 +455,7 @@ async def run_endgame_test():
         res_c = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res_c.status_code == 200, f"HTTP {res_c.status_code}: {res_c.text}"
         game_id = res_c.json()["game_id"]
@@ -422,6 +469,8 @@ async def run_endgame_test():
         step(3, f"Conectando WebSockets. '{u1}' se rinde...")
         async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1, \
                    websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
 
             # Consumir asignaciones e inicio
             for _ in range(2):
@@ -509,6 +558,123 @@ async def run_endgame_test():
 
 
 # ─────────────────────────────────────────────
+#  BLOQUE 5: MOTOR DE JUEGO Y REGLAS (4P)
+# ─────────────────────────────────────────────
+
+async def run_4p_core_rules_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 5: MOTOR DE JUEGO Y REGLAS (UNIT TEST EN MEMORIA)")
+    print("="*60)
+    try:
+        step(1, "Tablero Inicial 16x16...")
+        manager = GameManager()
+        game_id = "test_4p_core"
+        manager.create_game(creator_name="p1", game_id=game_id, mode="1v1v1v1", participants=["p1", "p2", "p3", "p4"])
+        
+        for p in ["p1", "p2", "p3", "p4"]:
+            manager.get_game_state(game_id).setdefault("active_pieces", []).append("black")        
+        state = manager.get_game_state(game_id)
+        state["status"] = "playing"
+        state["current_player"] = "black"
+        state["active_pieces"] = ["black", "white", "red", "blue"]
+        state["piece_by_username"] = {"p1":"black", "p2":"white", "p3":"red", "p4":"blue"}
+
+        board = state["board"]
+        assert len(board) == 16 and len(board[0]) == 16, "Tablero no es 16x16"
+        assert board[3][3] == "black" and board[11][11] == "blue", "Clusters no estan colocados correctamente"
+        ok("Tablero inicial configurado y clusters posicionados")
+
+        step(2, "Flanqueo Multicolor...")
+        board[7][4] = "black"
+        board[7][5] = "white"
+        board[7][6] = "red"
+        board[7][7] = None
+
+        await manager.make_move(game_id, "black", 7, 7)
+        new_board = state["board"]
+        assert new_board[7][5] == "black" and new_board[7][6] == "black", "Flanqueo fallo"
+        ok("Flanqueo multicolor exitoso")
+
+        step(3, "Salto de Turno Automatico (Skip)...")
+        state["current_player"] = "white"
+        empty_board = [[None for _ in range(16)] for _ in range(16)]
+        empty_board[0][0] = "blue"
+        empty_board[1][0] = "white" 
+        empty_board[3][3] = "white"
+        empty_board[3][4] = "blue"
+        state["board"] = empty_board
+        
+        await manager.make_move(game_id, "white", 3, 5)
+        assert state["current_player"] == "blue", f"Turno es {state['current_player']}"
+        ok("Turno salto a 'blue' ignorando a 'red'")
+
+        print("\n  ✔ BLOQUE 5 PASADO: Nucleo del Motor 4P OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 5 FALLIDO: {e}")
+        return False
+
+
+# ─────────────────────────────────────────────
+#  BLOQUE 6: FIN DE PARTIDA, ELO Y ESTADISTICAS (4P)
+# ─────────────────────────────────────────────
+
+async def run_4p_endgame_elo_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 6: FIN DE PARTIDA, ELO Y ESTADISTICAS (4P)")
+    print("="*60)
+    users, tokens, ids = get_random_users(4)
+    try:
+        step(1, "Iniciando partida para forzar ganador...")
+        res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {tokens[0]}"}, json={"mode": "1v1v1v1"})
+        game_id = res.json()["game_id"]
+        for t in tokens[1:]: requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t}"})
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[0]}") as ws0, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[1]}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[2]}") as ws2, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[3]}") as ws3:
+            
+            await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
+
+            step(2, "Rindiendo a 3/4 jugadores secuencialmente...")
+            await ws0.send(json.dumps({"action": "surrender"}))
+            await ws1.send(json.dumps({"action": "surrender"}))
+            await ws2.send(json.dumps({"action": "surrender"}))
+
+            step(3, "Calculo de posiciones y ganadores...")
+            game_over_reached = False
+            for _ in range(10):
+                estado = await wait_for_game_update(ws3)
+                if estado and estado["payload"]["game_over"]:
+                    game_over_reached = True
+                    break
+                    
+            assert game_over_reached, "El juego no marco game_over"
+            ok("Placements entregados correctamente.")
+
+        await asyncio.sleep(2.0) 
+
+        step(4, "Comprobando variacion ELO (Battle Royale)...")
+        stats = [requests.get(f"{BASE_URL}/api/users/{uid}/stats").json() for uid in ids]
+        elos = [s["stats_4p"]["elo"] for s in stats]
+        assert any(e > 1000 for e in elos) and any(e < 1000 for e in elos), "ELO no distribuido"
+        ok(f"ELO matematicamente distribuido: {elos}")
+
+        step(5, "Registro en el historial...")
+        hist = requests.get(f"{BASE_URL}/api/users/me/history", headers={"Authorization": f"Bearer {tokens[3]}"}).json()
+        assert any("º" in p["result"] for p in hist), "El resultado no indica Puesto de 4P"
+        ok("El historial registra la posicion correctamente")
+
+        print("\n  ✔ BLOQUE 6 PASADO: ELO 4P OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 6 FALLIDO: {e}")
+        return False
+    finally:
+        for t, u in zip(tokens, users): delete_user(t, u)
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -519,6 +685,8 @@ async def async_main():
     results["Sincronizacion de tablero (1v1)"]            = await run_board_sync_test()
     results["Reglas de juego y seguridad"]                = await run_rules_security_test()
     results["Fin de partida: ELO e historial"]            = await run_endgame_test()
+    results["Motor de Juego y Reglas (4P en memoria)"]    = await run_4p_core_rules_test()
+    results["Fin de Partida, ELO y Estadisticas (4P)"]    = await run_4p_endgame_elo_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")

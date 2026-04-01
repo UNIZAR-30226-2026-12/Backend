@@ -14,6 +14,9 @@ import requests
 import json
 import uuid
 import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
+from game.manager import GameManager
 
 BASE_URL = "http://localhost:8081"
 WS_URL   = "ws://localhost:8081"
@@ -56,13 +59,58 @@ def delete_user(token, username):
     else:
         print(f"   [Limpieza] ATENCION — No se pudo eliminar '{username}': {res.text}")
 
+def get_user_id(token):
+    return requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {token}"}).json()["id"]
+
+def create_and_login(username, password="password123"):
+    email = f"{username}@test.com"
+    requests.post(f"{BASE_URL}/api/auth/register", json={"username": username, "email": email, "password": password})
+    return requests.post(f"{BASE_URL}/api/auth/login", data={"username": username, "password": password}).json()["access_token"]
+
+def get_random_users(count):
+    users = []
+    tokens = []
+    ids = []
+    for _ in range(count):
+        u = f"u4p_{uuid.uuid4().hex[:4]}"
+        t = create_and_login(u)
+        users.append(u)
+        tokens.append(t)
+        ids.append(get_user_id(t))
+    return users, tokens, ids
+
+async def wait_for_game_update(ws, timeout=4.0):
+    for _ in range(12):
+        msg = await safe_recv(ws, timeout=timeout)
+        if msg and msg.get("type") == "game_state_update":
+            return msg
+    return None
+
+async def wait_for_board(ws, timeout=3.0):
+    # Lee mensajes hasta encontrar el estado real del juego ignorando el lobby
+    for _ in range(10):
+        msg = await safe_recv(ws, label="wait_board", timeout=timeout)
+        if msg and msg.get("type") == "game_state_update":
+            return msg
+    return None
+
 async def safe_recv(ws, label="WS", timeout=3.0):
     try:
-        raw  = await asyncio.wait_for(ws.recv(), timeout=timeout)
-        data = json.loads(raw)
-        tipo = data.get("type", "?")
-        debug(f"[{label}] tipo='{tipo}' | payload={str(data.get('payload',''))[:120]}")
-        return data
+        while True:
+            raw  = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            data = json.loads(raw)
+            tipo = data.get("type", "?")
+            
+            if tipo == "waiting_for_player":
+                await ws.send(json.dumps({"action": "set_ready", "ready": True}))
+                debug(f"[{label}] Auto-ready enviado.")
+                continue
+                
+            if tipo == "room_sync":
+                continue
+                
+            debug(f"[{label}] tipo='{tipo}' | payload={str(data.get('payload',''))[:120]}")
+            return data
     except asyncio.TimeoutError:
         debug(f"[{label}] TIMEOUT ({timeout}s) — sin mensaje")
         return None
@@ -75,7 +123,7 @@ def create_game_and_join(token_host, token_guest):
     res = requests.post(
         f"{BASE_URL}/api/games/create",
         headers={"Authorization": f"Bearer {token_host}"},
-        json={"mode": "1v1"}
+        json={"mode": "1vs1"}
     )
     assert res.status_code == 200, f"Error creando sala: {res.text}"
     game_id = res.json()["game_id"]
@@ -138,7 +186,10 @@ async def run_flickering_test():
                 ok("Reconexion final exitosa. Asignacion de color recibida")
 
                 step(5, "Verificando que el estado del juego es coherente (no corrompido)...")
-                tablero = await safe_recv(ws1, label=f"tablero-final-{u1}", timeout=4.0)
+                tablero, _ = await asyncio.gather(
+                    wait_for_board(ws1, timeout=4.0),
+                    wait_for_board(ws_rival, timeout=4.0)
+                )
                 if tablero and tablero.get("type") == "game_state_update":
                     game_over = tablero["payload"].get("game_over", False)
                     assert not game_over, \
@@ -201,11 +252,12 @@ async def run_reconnection_test():
         async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
             await safe_recv(ws2, label=f"asig-{u2}")
 
-            step(3, f"'{u1}' se conecta y luego se desconecta abruptamente...")
+            step(3, f"'{u1}' se conecta, empieza la partida y luego se desconecta abruptamente...")
             async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1:
                 asig = await safe_recv(ws1, label=f"asig-{u1}")
                 assert asig and asig.get("type") == "player_assignment"
-                debug(f"'{u1}' recibio asignacion antes de desconectarse")
+                await asyncio.gather(wait_for_board(ws1), wait_for_board(ws2))
+                debug(f"'{u1}' recibio asignacion y empezo la partida antes de desconectarse")
             debug(f"'{u1}' desconectado. Simulando microcorte de 0.8s...")
 
             step(4, "Esperando 0.8s (microcorte)...")
@@ -221,7 +273,7 @@ async def run_reconnection_test():
                 debug(f"Color recuperado: {asig_re.get('payload', {}).get('color')}")
                 ok("Color recuperado correctamente al reconectarse")
 
-                tablero = await safe_recv(ws1_re, label=f"tablero-recon-{u1}", timeout=6.0)
+                tablero = await wait_for_board(ws1_re, timeout=6.0)
                 if tablero:
                     game_over = tablero.get("payload", {}).get("game_over", False)
                     assert not game_over, \
@@ -279,11 +331,12 @@ async def run_abandonment_test():
         async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t4}") as ws4:
             await safe_recv(ws4, label=f"asig-{u4}")
 
-            # u3 entra y cierra la conexion definitivamente
+            # u3 entra, espera a que empiece y abandona la conexión
             async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t3}") as ws3:
                 await safe_recv(ws3, label=f"asig-{u3}")
-                debug(f"'{u3}' conectado. Desconectando definitivamente (ragequit)...")
-            debug(f"'{u3}' desconectado. El servidor deberia iniciar el temporizador de abandono.")
+                await asyncio.gather(wait_for_board(ws3), wait_for_board(ws4))
+                debug(f"'{u3}' conectado y partida activa. Desconectando definitivamente (ragequit)...")
+            debug(f"'{u3}' desconectado de partida iniciada. El servidor deberia iniciar el temporizador de abandono.")
 
             step(3, "Esperando que el servidor detecte el abandono y declare ganador...")
             debug("Monitorizando mensajes en el WS de '{u4}' (timeout total: 30s)...")
@@ -348,7 +401,7 @@ async def run_isolation_test():
         res_a = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {tokens[0]}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res_a.status_code == 200, f"Error creando Sala A: {res_a.text}"
         game_a = res_a.json()["game_id"]
@@ -358,7 +411,7 @@ async def run_isolation_test():
         res_b = requests.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {tokens[2]}"},
-            json={"mode": "1v1"}
+            json={"mode": "1vs1"}
         )
         assert res_b.status_code == 200, f"Error creando Sala B: {res_b.text}"
         game_b = res_b.json()["game_id"]
@@ -374,14 +427,14 @@ async def run_isolation_test():
                    websockets.connect(f"{WS_URL}/ws/play/{game_b}?token={tokens[2]}") as ws_b1, \
                    websockets.connect(f"{WS_URL}/ws/play/{game_b}?token={tokens[3]}") as ws_b2:
 
-            debug("Vaciando mensajes de inicializacion de todos los WebSockets...")
-            await asyncio.sleep(0.5)
-            for ws, label in [(ws_a1, "A1"), (ws_a2, "A2"), (ws_b1, "B1"), (ws_b2, "B2")]:
-                while True:
-                    msg = await safe_recv(ws, label=label, timeout=0.3)
-                    if msg is None:
-                        break
-            ok("Mensajes de inicializacion consumidos")
+            debug("Esperando a que las dos salas arranquen oficialmente...")
+            await asyncio.gather(
+                wait_for_board(ws_a1),
+                wait_for_board(ws_a2),
+                wait_for_board(ws_b1),
+                wait_for_board(ws_b2)
+            )
+            ok("Ambas salas inicializadas y tableros en pantalla. Listos para test de aislamiento.")
 
             step(4, f"Jugador A1 ({names[0]}) realiza un movimiento en la Sala A...")
             movimiento = {"action": "make_move", "row": 2, "col": 3, "player": "black"}
@@ -438,6 +491,117 @@ async def run_isolation_test():
             if t:
                 delete_user(t, n)
 
+# ─────────────────────────────────────────────
+#  BLOQUE 5: RENDICION Y ABANDONO PARCIAL (4P)
+# ─────────────────────────────────────────────
+
+async def run_4p_abandonment_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 5: RENDICION Y ABANDONO PARCIAL (4P)")
+    print("="*60)
+    users, tokens, ids = get_random_users(4)
+    try:
+        step(1, "Iniciando sala 4P para testeo de abandonos...")
+        res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {tokens[0]}"}, json={"mode": "1v1v1v1"})
+        game_id = res.json()["game_id"]
+        for t in tokens[1:]: requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t}"})
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[0]}") as ws0, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[1]}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[2]}") as ws2, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[3]}") as ws3:
+            
+            await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
+
+            step(2, "Rendicion Parcial...")
+            await ws0.send(json.dumps({"action": "surrender", "player": "black"}))
+            estado = await wait_for_game_update(ws1)
+            assert not estado["payload"]["game_over"], "La partida termino erroneamente"
+            assert "black" not in estado["payload"].get("active_pieces", []), "Black no quitado"
+            assert estado["payload"]["current_player"] == "white", "Turno no salto a white"
+            ok("Rendicion manejada sin acabar el juego y pasando el turno")
+
+            step(3, "Abandono por Timeout (Ragequit Parcial)...")
+            await ws1.close() 
+            abandonado = False
+            for _ in range(16):
+                estado = await wait_for_game_update(ws2)
+                if estado and "white" in estado["payload"].get("abandoned_pieces", []):
+                    assert not estado["payload"]["game_over"], "El abandono acabo la partida"
+                    abandonado = True
+                    break
+            assert abandonado, "El timeout no expulso al jugador 'white'"
+            ok("Expulsion por timeout parcial (30s) procesada con exito")
+
+            step(4, "Bloqueo Mutuo Prematuro (todos se rinden)...")
+            await ws2.send(json.dumps({"action": "surrender"}))
+            await ws3.send(json.dumps({"action": "surrender"}))
+            
+            game_over_reached = False
+            for _ in range(10):
+                final_state = await wait_for_game_update(ws3)
+                if final_state and final_state["payload"]["game_over"]:
+                    game_over_reached = True
+                    break
+            
+            assert game_over_reached, "El juego no reporta fin global tras bloqueo mutuo"
+            ok("Fin global notificado tras quedarse sin jugadores")
+
+        print("\n  ✔ BLOQUE 5 PASADO: Manejo de ciclo de vida parcial OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 5 FALLIDO: {e}")
+        return False
+    finally:
+        for t, u in zip(tokens, users): delete_user(t, u)
+
+# ─────────────────────────────────────────────
+#  BLOQUE 6: RESILIENCIA DE RED MULTIPLE (4P)
+# ─────────────────────────────────────────────
+
+async def run_4p_flickering_recon_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 6: RESILIENCIA DE RED MULTIPLE (4P)")
+    print("="*60)
+    users, tokens, ids = get_random_users(4)
+    try:
+        res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {tokens[0]}"}, json={"mode": "1v1v1v1"})
+        game_id = res.json()["game_id"]
+        for t in tokens[1:]: requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t}"})
+
+        step(1, "Flickering Multiple...")
+        ws0 = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[0]}")
+        ws1 = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[1]}")
+        ws2 = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[2]}")
+        ws3 = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[3]}")
+
+        await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
+
+        await ws1.close()
+        await ws2.close()
+
+        step(2, "Reconexion de identidad...")
+        ws1_re = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[1]}")
+        ws2_re = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={tokens[2]}")
+
+        asig1 = await safe_recv(ws1_re)
+        asig2 = await safe_recv(ws2_re)
+        assert asig1 and asig2, "No se recibio asigacion en reconexion"
+        assert set([asig1["payload"]["color"], asig2["payload"]["color"]]) == {"white", "red"}, "Colores perdidos!"
+        ok("Reconexiones simultaneas tratadas sin perder piezas.")
+
+        await ws0.close()
+        await ws1_re.close()
+        await ws2_re.close()
+        await ws3.close()
+
+        print("\n  ✔ BLOQUE 6 PASADO: Multihilo sin crashing OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 6 FALLIDO: {e}")
+        return False
+    finally:
+        for t, u in zip(tokens, users): delete_user(t, u)
 
 # ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
@@ -450,6 +614,8 @@ async def async_main():
     results["Reconexion exitosa tras microcorte"]     = await run_reconnection_test()
     results["Abandono definitivo por timeout"]        = await run_abandonment_test()
     results["Aislamiento total de salas"]             = await run_isolation_test()
+    results["Rendicion y Abandono Parcial (4P)"]      = await run_4p_abandonment_test()
+    results["Resiliencia de Red Flickering (4P)"]     = await run_4p_flickering_recon_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")
