@@ -30,45 +30,38 @@ Como hacerlo: Crear un archivo .github/workflows/test.yml que levante una base d
 
 
 ---------
-# COSAS QUE FALTAN DEL 4P
 
-Fragilidad del Lobby (La sala "de cristal")
-En 1v1: Si invitas a un amigo y le da a "Rechazar", o entra a la sala de espera y le da a "Salir", el servidor borra la sala (DELETE FROM lobbies). Esto tiene sentido, porque si tu único rival se va, te quedas solo.
 
-El problema en 4P: Si el Anfitrión (Host) invita a 3 amigos, y uno solo de ellos le da a "Rechazar" la invitación (o entra y luego sale), ¡tu código actual ejecuta el mismo DELETE FROM lobbies! Destruye la sala entera y expulsa al Host y a los otros 2 amigos que ya estaban dentro y listos.
+El dilema de las "Fichas Zombi"
+¿Qué pasa con las fichas de un jugador cuando pulsa el botón de "Rendirse" o se le desconecta el internet?
 
-Lo que falta: En 4P, si alguien rechaza o sale de la fase waiting, simplemente debería vaciarse su hueco para que el Host pueda invitar a otra persona, sin destruir la sala entera.
+Tu lógica actual: Las fichas se quedan en el tablero y mantienen su color original. Los otros 3 jugadores pueden seguir utilizándolas para hacer flanqueos y robárselas.
+
+¿Es un problema?: No, es una variante muy válida (hace que el jugador que se rinde sea una "mina de oro" para los demás). Pero algunos juegos de mesa optan por convertir esas fichas en "muros grises" que ya no se pueden voltear ni usar para flanquear. Es solo una decisión de diseño que debes tener clara.
+
+
+---------
+
+Opciones de partida personalizadas
+Actualmente la creación de salas es muy directa (1v1 o 1v1v1v1). En el futuro, a los jugadores les suele gustar personalizar la sala "básica":
+
+Elegir si la sala es Pública o Privada (con contraseña).
+
+Elegir el tiempo de turno (ej. Partida Rápida de 1 minuto vs Partida Lenta de 10 minutos).
+
+Opcional: Elegir el tamaño del tablero en 4P (ej. jugar en 12x12 en lugar de 16x16 para que la partida sea más caótica y rápida).
+
+
+---------
+
+Gestión de Conexiones Muertas (Ping/Pong o Heartbeats)
+Actualmente confías en que la librería websockets lance una excepción si el cliente se desconecta (por ejemplo, cuando cierra la pestaña).
+
+El problema: Si un usuario pierde la conexión en el móvil (entra en un túnel, pierde el 4G), el socket a veces se queda "medio abierto" (estado half-open). El servidor piensa que el usuario sigue ahí y nunca dispara el temporizador de abandono de 30 segundos.
+
+La mejora técnica: Implementar un sistema de Ping/Pong en ws/manager.py. El servidor debe enviar un mensaje invisible {"type": "ping"} cada 10 segundos. Si el cliente no responde con un {"type": "pong"} en 5 segundos, el servidor cierra activamente el socket y dispara el abandono.
 
 
 ---------
 
 
-Injusticia Matemática en los Empates (Desempate por turno)
-En 1v1: Si la partida acaba con empate a fichas (ej. 32 a 32), la función resolve_game_state devuelve winner: "draw". El ELO no se toca y a ambos se les registra un empate.
-
-El problema en 4P: En tu función _compute_positions_4p, usas esto para desempatar: remaining.sort(key=lambda p: (-score.get(p, 0), TURN_ORDER_4P.index(p))).
-Esto significa que si el Negro (Turno 0) y el Azul (Turno 3) empatan con 20 fichas cada uno, el Negro siempre quedará 1º y el Azul siempre quedará 2º por culpa de su orden de turno. En lugar de un "Empate por el 1º puesto", le das +50 de ELO al Negro y +25 de ELO al Azul injustamente.
-
-Lo que falta: Que el 4P reconozca los empates a puntos y reparta el mismo puesto y el mismo ELO a los que empaten.
-
-
----------
-
-
-La Inteligencia Artificial (vs_ai y Relleno de Huecos)
-En 1v1: Si no tienes amigos conectados o no quieres jugar con randoms, puedes seleccionar el modo vs_ai y el servidor asigna a "IA" como jugador blanco.
-
-El problema en 4P: El modo 4P exige estrictamente 4 humanos (participant_count_expected = 4). Si estáis 3 amigos en Discord, literalmente no podéis iniciar la partida. Estáis obligados a abrir la sala y esperar a que un desconocido entre.
-
-Lo que falta: Poder lanzar una sala 4P con 3 humanos y rellenar el último hueco con 1 IA, o 1 humano contra 3 IAs.
-
-
----------
-
-
-Falta de autoridad del Host (El Troll de la Sala)
-En 1v1: Si abres una sala pública, entra un random y no le da al botón de "Listo" (set_ready: true), simplemente te vas de tu sala, se destruye y creas otra. Tardas 2 segundos.
-
-El problema en 4P: Si estáis 3 amigos en la sala y dejáis el cuarto hueco abierto al público, si entra un random y decide no darle al botón de "Listo" para molestar, os tiene secuestrados a los tres. Como el juego no arranca hasta que los 4 digan "Ready", la única solución es destruir la sala y que los 3 amigos volváis a empezar el proceso de matchmaking.
-
-Lo que falta: Un endpoint para que el creador de la sala (creator_id) pueda expulsar (Kick) a un jugador específico de la sala de espera.

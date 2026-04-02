@@ -484,6 +484,29 @@ password=MiClaveSecreta
 
 ---
 
+#### 🟢 GET `/api/ranking/`
+**Ranking global de jugadores.** Por defecto devuelve el Top 50.
+
+**Query Parameters (opcionales):**
+- `limit`: int (1-100, default 50).
+- `skip`: int (offset, default 0).
+
+**Respuesta (200):**
+```json
+{
+  "ranking": [
+    {
+      "id": 45,
+      "username": "Kratos",
+      "elo": 2040,
+      "avatar_url": "..."
+    }
+  ]
+}
+```
+
+---
+
 ### GAMES & LOBBY (`/api/games`)
 
 #### 🔵 POST `/api/games/create`
@@ -492,7 +515,7 @@ password=MiClaveSecreta
 **Body:**
 ```json
 {
-  "mode": "1vs1"
+  "mode": "1vs1" | "1vs1vs1vs1" | "vs_ai"
 }
 ```
 
@@ -547,7 +570,7 @@ password=MiClaveSecreta
 ```json
 {
   "friend_ids": [2],
-  "mode": "1vs1"
+  "mode": "1vs1" | "1vs1vs1vs1"
 }
 ```
 
@@ -590,6 +613,32 @@ password=MiClaveSecreta
 
 ---
 
+#### 🔴 POST `/api/games/{game_id}/kick/{username}`
+**Expulsar a un jugador del lobby (Sólo el creador de la sala).**
+
+**Respuesta (200):**
+```json
+{
+  "status": "success",
+  "message": "Player expulsado"
+}
+```
+
+---
+
+#### 🤖 POST `/api/games/{game_id}/add_bot`
+**Añadir un bot (IA) al lobby para rellenar un hueco (Sólo el creador de la sala).**
+
+**Respuesta (200):**
+```json
+{
+  "status": "success",
+  "bot_name": "IA_1"
+}
+```
+
+---
+
 #### 🟢 GET `/api/games/{game_id}/state`
 **Obtener información pre-match sobre los miembros, si aceptaron y su estado 'Listo'.**
 
@@ -608,60 +657,12 @@ password=MiClaveSecreta
        "is_ready": true
      },
      {
-       "id": 2,
-       "username": "Player2",
-       "rr": 1200,
-       "avatar_url": "...",
-       "is_ready": false
+       "id": -1,
+       "username": "IA_1",
+       "rr": 1000,
+       "avatar_url": "",
+       "is_ready": true
      }
-  ]
-}
-```
-
----
-
-#### 🔵 POST `/api/games/{game_id}/ready`
-**Marcarse como "Listo". Si el último dice Listos=true, inicia partida automáticamente.**
-
-**Body:** 
-```json
-{
-  "ready": true
-}
-```
-
-**Respuesta (200):**
-```json
-{
-  "status": "success",
-  "ready": true,
-  "game_status": "waiting | playing"
-}
-```
-
----
-
-### RANKING (`/api/ranking`)
-
-#### 🟢 GET `/api/ranking/`
-**Devuelve el Top 50 Global Playerboard.**
-
-**Respuesta (200):**
-```json
-{
-  "ranking": [
-    {
-      "id": 45,
-      "username": "Kratos",
-      "elo": 2040,
-      "avatar_url": "..."
-    },
-    {
-      "id": 12,
-      "username": "Atenea",
-      "elo": 1900,
-      "avatar_url": "..."
-    }
   ]
 }
 ```

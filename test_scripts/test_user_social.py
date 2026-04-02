@@ -340,6 +340,21 @@ def run_ranking_test():
         else:
             debug(f"'{dummy}' no esta aun en el top (puede requerir ELO minimo)")
 
+        step(7, "Probando la nueva paginacion (limit y skip)...")
+        res_pag = requests.get(f"{BASE_URL}/api/ranking/?limit=2&skip=1")
+        assert res_pag.status_code == 200, f"HTTP {res_pag.status_code}: {res_pag.text}"
+        data_pag = res_pag.json()["ranking"]
+        
+        assert len(data_pag) <= 2, \
+            f"El limit fallo: devolvio {len(data_pag)} elementos, se esperaban 2"
+            
+        if len(ranking) >= 3:
+            assert data_pag[0]["username"] == ranking[1]["username"], \
+                "El offset (skip) no esta desplazando los resultados correctamente"
+            ok("Paginacion (limit=2, skip=1) verificada correctamente")
+        else:
+            debug("Paginacion responde bien (no hay usuarios suficientes para testear offset exacto)")
+        
         print("\n  ✔ BLOQUE 3 PASADO: Leaderboard global OK")
         return True
 

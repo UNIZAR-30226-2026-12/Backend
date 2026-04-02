@@ -3,7 +3,7 @@ import json
 from typing import List, Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from ai.engine import get_best_ai_move
+from ai.engine import get_best_ai_move, get_best_ai_move_4p
 from auth.dependencies import verify_token_ws
 from game.manager import TURN_ORDER_4P, game_manager
 from persistence.database import database
@@ -99,13 +99,19 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
 
     if game.get("mode") == "vs_ai":
         game_manager.set_game_playing(game_id)
-        await manager.broadcast_game_state(game_id, game_manager.get_game_state(game_id))
+        await websocket.send_json({
+            "type": "game_state_update",
+            "payload": game_manager.get_game_state(game_id)
+        })
     else:
         await broadcast_room_sync(game_id)
         if game.get("status") == "waiting":
             await websocket.send_json({"type": "waiting_for_player", "payload": {"message": "Esperando a que todos esten listos..."}})
         else:
-            await manager.broadcast_game_state(game_id, game_manager.get_game_state(game_id))
+            await websocket.send_json({
+                "type": "game_state_update",
+                "payload": game_manager.get_game_state(game_id)
+            })
 
     try:
         while True:
@@ -155,15 +161,40 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     if ns and ns.get("game_over"): await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
                     await manager.broadcast_game_state(game_id, ns)
 
-                    if game.get("mode") == "vs_ai" and ns and ns.get("current_player") == "white" and not ns.get("game_over"):
-                        await asyncio.sleep(0.5)
-                        ai_move = get_best_ai_move(ns["board"], "white")
-                        if ai_move:
-                            ai_success, _ = await game_manager.make_move(game_id, "white", ai_move.row, ai_move.col)
-                            if ai_success:
-                                ais = game_manager.get_game_state(game_id)
-                                if ais and ais.get("game_over"): await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
-                                await manager.broadcast_game_state(game_id, ais)
+                    def check_and_trigger_ai(current_state):
+                        if not current_state or current_state.get("game_over"): return
+                        
+                        c_player = current_state.get("current_player")
+                        g_mode = game.get("mode", "1v1")
+                        
+                        is_1v1_ai = (g_mode == "vs_ai" and c_player == "white")
+                        u_name = current_state.get("username_by_piece", {}).get(c_player)
+                        is_4p_ai = (g_mode in ("1v1v1v1", "1vs1vs1vs1") and u_name and u_name.startswith("IA_"))
+
+                        if is_1v1_ai or is_4p_ai:
+                            async def play_ai_turn():
+                                await asyncio.sleep(0.5)
+                                if is_4p_ai:
+                                    ai_move = await asyncio.to_thread(get_best_ai_move_4p, current_state["board"], c_player)
+                                    r, c = (ai_move["row"], ai_move["col"]) if ai_move else (None, None)
+                                else:
+                                    ai_move = await asyncio.to_thread(get_best_ai_move, current_state["board"], c_player)
+                                    r, c = (ai_move.row, ai_move.col) if ai_move else (None, None)
+                                
+                                if r is not None and c is not None:
+                                    ai_success, _ = await game_manager.make_move(game_id, c_player, r, c)
+                                    if ai_success:
+                                        ais = game_manager.get_game_state(game_id)
+                                        if ais and ais.get("game_over"): 
+                                            await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                                        await manager.broadcast_game_state(game_id, ais)
+                                        
+                                        check_and_trigger_ai(ais)
+
+                            asyncio.create_task(play_ai_turn())
+
+                    check_and_trigger_ai(ns)
+                    
                 else: await manager.send_error(websocket, msg)
                 continue
 

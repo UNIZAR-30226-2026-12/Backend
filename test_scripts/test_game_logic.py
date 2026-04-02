@@ -18,6 +18,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 from game.manager import GameManager
+from ai.engine import get_best_ai_move_4p
 
 BASE_URL = "http://localhost:8081"
 WS_URL   = "ws://localhost:8081"
@@ -675,6 +676,60 @@ async def run_4p_endgame_elo_test():
         for t, u in zip(tokens, users): delete_user(t, u)
 
 # ─────────────────────────────────────────────
+#  BLOQUE 7: IA Y EMPATES MATEMATICOS
+# ─────────────────────────────────────────────
+
+async def run_fair_ties_and_ai_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 7: IA GREEDY (16x16) Y EMPATES JUSTOS")
+    print("="*60)
+    try:
+        step(1, "Probando heuristica de IA en tablero 16x16...")
+        manager = GameManager()
+        game_id = "test_premium"
+        manager.create_game(creator_name="h1", game_id=game_id, mode="1v1v1v1", participants=["h1", "h2", "h3", "h4"])
+        
+        state = manager.get_game_state(game_id)
+        state["board"][0][1] = "black" 
+        
+        best_move = get_best_ai_move_4p(state["board"], "white")
+        assert best_move is not None, "La IA no devolvió ningún movimiento en 16x16"
+        ok(f"La matriz de pesos 16x16 funciona. Mejor movimiento calculado: {best_move}")
+
+        step(2, "Forzando un empate matematico exacto a 3 bandas...")
+        empty_board = [[None for _ in range(16)] for _ in range(16)]
+        
+        for i in range(20): empty_board[2][i%16] = "black"
+        for i in range(20): empty_board[3][i%16] = "white"
+        for i in range(20): empty_board[4][i%16] = "red"
+        for i in range(5):  empty_board[5][i%16] = "blue"
+        
+        state["board"] = empty_board
+        state["active_pieces"] = ["black", "white", "red", "blue"]
+        state["piece_by_username"] = {"h1":"black", "h2":"white", "h3":"red", "h4":"blue"}
+        state["username_by_piece"] = {"black":"h1", "white":"h2", "red":"h3", "blue":"h4"}
+        
+        positions = manager._compute_positions_4p(state)
+        
+        debug(f"Puntuaciones artificiales: Black=20, White=20, Red=20, Blue=5")
+        debug(f"Puestos asignados: {positions}")
+        
+        assert positions["black"] == 1, "Black no quedo 1º"
+        assert positions["white"] == 1, "White no quedo 1º en el empate"
+        assert positions["red"] == 1, "Red no quedo 1º en el empate"
+        assert positions["blue"] == 4, "Blue no quedo 4º tras el empate triple"
+        
+        ok("El sistema detectó el empate múltiple y asignó el puesto 1 a los tres jugadores por igual")
+
+        print("\n  ✔ BLOQUE 7 PASADO: IA y Empates Justos OK")
+        return True
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 7 FALLIDO: {e}")
+        return False
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -687,6 +742,7 @@ async def async_main():
     results["Fin de partida: ELO e historial"]            = await run_endgame_test()
     results["Motor de Juego y Reglas (4P en memoria)"]    = await run_4p_core_rules_test()
     results["Fin de Partida, ELO y Estadisticas (4P)"]    = await run_4p_endgame_elo_test()
+    results["Motor IA (16x16) y Empates Justos"]          = await run_fair_ties_and_ai_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")

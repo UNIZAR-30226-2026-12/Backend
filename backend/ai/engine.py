@@ -1,6 +1,9 @@
 from typing import Optional
 from rules.schemas import Player, Board, Coordinate, BOARD_SIZE
 from rules.logic import get_valid_moves, apply_move, count_score
+from typing import Optional
+from rules.schemas import Player, Board, Coordinate, BOARD_SIZE
+from rules.logic import get_valid_moves, apply_move, count_score, get_valid_moves_4p, count_score_4p, get_flips_4p
 
 POSITION_WEIGHTS = [
     [100, -20, 10, 5, 5, 10, -20, 100],
@@ -11,6 +14,25 @@ POSITION_WEIGHTS = [
     [10, -2, -1, -1, -1, -1, -2, 10],
     [-20, -50, -2, -2, -2, -2, -50, -20],
     [100, -20, 10, 5, 5, 10, -20, 100]
+]
+
+POSITION_WEIGHTS_4P = [
+    [ 500, -100,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50, -100,  500],
+    [-100, -200, -10, -10, -10, -10, -10, -10, -10, -10, -10, -10, -10, -10, -200, -100],
+    [  50,  -10,  10,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,  10,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,   5,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   5,  -10,   50],
+    [  50,  -10,  10,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,  10,  -10,   50],
+    [-100, -200, -10, -10, -10, -10, -10, -10, -10, -10, -10, -10, -10, -10, -200, -100],
+    [ 500, -100,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50,  50, -100,  500]
 ]
 
 def evaluate_board(board: Board, player: Player) -> int:
@@ -64,4 +86,34 @@ def get_best_ai_move(board: Board, player: Player) -> Optional[Coordinate]:
         val = minimax(new_board, 3, float('-inf'), float('inf'), False, player)
         if val > best_val:
             best_val, best_move = val, m
+    return best_move
+
+def get_best_ai_move_4p(board: Board, player: str) -> Optional[dict]:
+    """ 
+    Heurística Greedy usando matriz de pesos estática para el tablero 16x16.
+    Combina el valor posicional de la casilla con la cantidad de fichas capturadas.
+    """
+    valid = get_valid_moves_4p(board, player)
+    if not valid: 
+        return None
+        
+    best_val, best_move = float('-inf'), valid[0]
+    
+    for m in valid:
+        r, c = m["row"], m["col"]
+        
+        # 1. Puntos por cantidad de fichas robadas (cada ficha vale 2 puntos)
+        flips = get_flips_4p(board, r, c, player)
+        flip_value = len(flips) * 2  
+        
+        # 2. Puntos por el valor estratégico de la casilla en 16x16
+        positional_value = POSITION_WEIGHTS_4P[r][c]
+        
+        # Puntuación final del movimiento
+        total_val = flip_value + positional_value
+            
+        if total_val > best_val:
+            best_val = total_val
+            best_move = m
+            
     return best_move

@@ -149,38 +149,63 @@ async def accept_invite(game_id: str, current_user: dict = Depends(get_current_u
 
 @router.post("/{game_id}/reject")
 async def reject_invite(game_id: str, current_user: dict = Depends(get_current_user)):
-    lobby = await database.fetch_one("SELECT l.id, l.creator_id, cu.username AS creator_username, li.status AS invite_status FROM lobbies l JOIN users cu ON cu.id = l.creator_id JOIN lobby_invites li ON li.lobby_id = l.id AND li.invited_user_id = :uid WHERE l.id = :id AND l.status = 'waiting' AND l.is_public = false", {"id": int(game_id), "uid": current_user["id"]})
+    lobby = await database.fetch_one("SELECT l.id, l.creator_id, cu.username AS creator_username, li.status AS invite_status, l.mode FROM lobbies l JOIN users cu ON cu.id = l.creator_id JOIN lobby_invites li ON li.lobby_id = l.id AND li.invited_user_id = :uid WHERE l.id = :id AND l.status = 'waiting' AND l.is_public = false", {"id": int(game_id), "uid": current_user["id"]})
     if not lobby: raise HTTPException(status_code=400, detail="Invitacion no disponible.")
     
-    parts = await get_lobby_participants(int(game_id))
-    await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
-    game_manager.remove_game(game_id)
+    await database.execute("UPDATE lobby_invites SET status = 'rejected' WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
     
-    for un in [p["username"] for p in parts if p["username"] != current_user["username"]]:
-        await notifier.send_invite_response(target_username=un, game_id=game_id, action="rejected", guest=current_user["username"])
+    if lobby["mode"] in ("1vs1", "1v1"):
+        parts = await get_lobby_participants(int(game_id))
+        await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
+        game_manager.remove_game(game_id)
+        for un in [p["username"] for p in parts if p["username"] != current_user["username"]]:
+            await notifier.send_invite_response(target_username=un, game_id=game_id, action="rejected", guest=current_user["username"])
+    else:
+        # En 4P, solo avisamos al host y no destruimos la sala
+        await notifier.send_invite_response(target_username=lobby["creator_username"], game_id=game_id, action="rejected", guest=current_user["username"])
+        
     return {"status": "success"}
 
 @router.post("/{game_id}/leave")
 async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_user)):
-    lobby = await database.fetch_one("SELECT id, creator_id, status FROM lobbies WHERE id = :id", {"id": int(game_id)})
+    lobby = await database.fetch_one("SELECT id, creator_id, status, mode FROM lobbies WHERE id = :id", {"id": int(game_id)})
     if not lobby: raise HTTPException(status_code=404, detail="Sala no existe")
 
-    parts = await get_lobby_participants(int(game_id))
-    uid_to_name = {p["user_id"]: p["username"] for p in parts}
-    if current_user["id"] not in uid_to_name: raise HTTPException(status_code=403, detail="No perteneces a sala")
+    game = game_manager.get_game_state(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Partida no encontrada")
+
+    parts_usernames = game.get("participants", [])
+    username = current_user["username"]
+    if username not in parts_usernames:
+        raise HTTPException(status_code=403, detail="No perteneces a sala")
     
     if lobby["status"] == "waiting":
-        await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
-        game_manager.remove_game(game_id)
-        for p in parts:
-            if p["username"] != uid_to_name[current_user["id"]]:
-                await notifier.send_invite_response(target_username=p["username"], game_id=game_id, action="left", guest=uid_to_name[current_user["id"]])
+        if current_user["id"] == lobby["creator_id"] or lobby["mode"] in ("1vs1", "1v1"):
+            # Si se va el Host, o es 1v1, destruimos la sala entera
+            await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
+            game_manager.remove_game(game_id)
+            for p in parts_usernames:
+                if p != username:
+                    await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
+        else:
+            # En 4P, si se va un Guest, simplemente liberamos su hueco
+            await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
+            
+            if username in game.get("participants", []):
+                game["participants"].remove(username)
+                game.get("players_ready", {}).pop(username, None)
+            
+            creator_name = await database.fetch_val("SELECT username FROM users WHERE id = :uid", {"uid": lobby["creator_id"]})
+            if creator_name:
+                await notifier.send_invite_response(target_username=creator_name, game_id=game_id, action="left", guest=username)
+            await ws_manager.broadcast_game_state(game_id, game)
         return {"status": "success"}
 
     if current_user["id"] != lobby["creator_id"]:
         await database.execute("UPDATE lobby_invites SET status = 'left' WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
     
-    success, msg = await game_manager.abandon_game(game_id, uid_to_name[current_user["id"]])
+    success, msg = await game_manager.abandon_game(game_id, username)
     if not success: raise HTTPException(status_code=400, detail=msg)
     
     game = game_manager.get_game_state(game_id)
@@ -193,17 +218,23 @@ async def get_lobby_state(game_id: str, current_user: dict = Depends(get_current
     lobby = await database.fetch_one("SELECT id, creator_id, status, mode FROM lobbies WHERE id = :id", {"id": int(game_id)})
     if not lobby: raise HTTPException(status_code=404, detail="Sala no encontrada")
 
-    invite = await database.fetch_one("SELECT status FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
-    if current_user["id"] != lobby["creator_id"] and not invite: raise HTTPException(status_code=403, detail="No perteneces a la sala")
-
     _, game = await get_game_or_create_from_lobby(int(game_id))
-    ready = game.get("players_ready", {}) if game else {}
-    
-    creator = await database.fetch_one("SELECT id, username, elo, avatar_url FROM users WHERE id = :uid", {"uid": lobby["creator_id"]})
-    invited = await database.fetch_all("SELECT u.id, u.username, u.elo, u.avatar_url, li.status, li.invite_order FROM lobby_invites li JOIN users u ON u.id = li.invited_user_id WHERE li.lobby_id = :id AND li.status = 'accepted' ORDER BY li.invite_order ASC", {"id": int(game_id)})
+    if current_user["username"] not in game.get("participants", []):
+        raise HTTPException(status_code=403, detail="No perteneces a la sala")
 
-    players = [{"id": creator["id"], "username": creator["username"], "rr": creator["elo"], "avatar_url": creator["avatar_url"], "is_ready": bool(ready.get(creator["username"], False))}] if creator else []
-    for r in invited: players.append({"id": r["id"], "username": r["username"], "rr": r["elo"], "avatar_url": r["avatar_url"], "is_ready": bool(ready.get(r["username"], False))})
+    ready = game.get("players_ready", {}) if game else {}
+    parts_usernames = game.get("participants", [])
+
+    players = []
+    if parts_usernames:
+        db_users = await database.fetch_all("SELECT id, username, elo, avatar_url FROM users WHERE username = ANY(:usernames)", {"usernames": parts_usernames})
+        user_map = {u["username"]: {"id": u["id"], "rr": u["elo"], "avatar_url": u["avatar_url"]} for u in db_users}
+        for uname in parts_usernames:
+            if uname.startswith("IA_"):
+                players.append({"id": -1, "username": uname, "rr": 1000, "avatar_url": "", "is_ready": True})
+            elif uname in user_map:
+                u = user_map[uname]
+                players.append({"id": u["id"], "username": uname, "rr": u["rr"], "avatar_url": u["avatar_url"], "is_ready": bool(ready.get(uname, False))})
 
     st = game.get("status", lobby["status"]) if game else lobby["status"]
     return {"game_id": game_id, "status": "playing" if st == "finished" else st, "mode": lobby["mode"], "players": players}
@@ -223,3 +254,58 @@ async def set_ready(game_id: str, body: ReadyRequest, current_user: dict = Depen
         game_manager.set_game_playing(game_id)
         await database.execute("UPDATE lobbies SET status = 'playing' WHERE id = :id", {"id": int(game_id)})
     return {"status": "success", "ready": body.ready, "game_status": game_manager.get_game_state(game_id).get("status", "waiting")}
+
+@router.post("/{game_id}/kick/{username_to_kick}")
+async def kick_player(game_id: str, username_to_kick: str, current_user: dict = Depends(get_current_user)):
+    lobby = await database.fetch_one("SELECT id, creator_id FROM lobbies WHERE id = :id", {"id": int(game_id)})
+    if not lobby: raise HTTPException(status_code=404, detail="Sala no encontrada")
+    if current_user["id"] != lobby["creator_id"]: raise HTTPException(status_code=403, detail="Solo el creador puede expulsar")
+    if current_user["username"] == username_to_kick: raise HTTPException(status_code=400, detail="No puedes expulsarte a ti mismo")
+
+    game = game_manager.get_game_state(game_id)
+    if not game or game["status"] != "waiting": raise HTTPException(status_code=400, detail="Partida ya iniciada o no existe")
+
+    parts = game.get("participants", [])
+    if username_to_kick not in parts: raise HTTPException(status_code=404, detail="Jugador no esta en la sala")
+
+    # Sacarlo del manager
+    parts.remove(username_to_kick)
+    game.get("players_ready", {}).pop(username_to_kick, None)
+
+    # Borrar la invitación si la había
+    uid_to_kick = await database.fetch_val("SELECT id FROM users WHERE username = :un", {"un": username_to_kick})
+    if uid_to_kick:
+        await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": uid_to_kick})
+
+    await notifier.send_invite_response(target_username=username_to_kick, game_id=game_id, action="kicked", guest=current_user["username"])
+    # Notificamos por WebSocket al resto para que se refresque el lobby
+    await ws_manager.broadcast_game_state(game_id, game)
+    return {"status": "success", "message": f"{username_to_kick} expulsado"}
+
+@router.post("/{game_id}/add_bot")
+async def add_bot(game_id: str, current_user: dict = Depends(get_current_user)):
+    lobby = await database.fetch_one("SELECT id, creator_id FROM lobbies WHERE id = :id", {"id": int(game_id)})
+    if not lobby: raise HTTPException(status_code=404, detail="Sala no encontrada")
+    if current_user["id"] != lobby["creator_id"]: raise HTTPException(status_code=403, detail="Solo el creador puede añadir bots")
+    
+    game = game_manager.get_game_state(game_id)
+    if not game or game["status"] != "waiting": raise HTTPException(status_code=400, detail="No se puede añadir bots ahora")
+    
+    expected = game.get("participant_count_expected", 2)
+    parts = game.setdefault("participants", [])
+    if len(parts) >= expected: raise HTTPException(status_code=400, detail="La sala ya esta llena")
+    
+    # Asignar IA
+    bot_num = len([p for p in parts if p.startswith("IA_")]) + 1
+    bot_name = f"IA_{bot_num}"
+    parts.append(bot_name)
+    game.setdefault("players_ready", {})[bot_name] = True
+    
+    if len(parts) >= expected:
+        await database.execute("UPDATE lobbies SET status = 'playing' WHERE id = :id", {"id": int(game_id)})
+        game_manager.set_game_playing(game_id)
+    elif game_manager.are_all_players_ready(game_id):
+        game_manager.set_game_playing(game_id)
+        
+    await ws_manager.broadcast_game_state(game_id, game)
+    return {"status": "success", "bot_name": bot_name}

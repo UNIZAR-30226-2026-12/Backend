@@ -5,7 +5,7 @@
 
 * **Bloque 1: Autenticación, perfil y personalización:** Valida el ciclo de identidad completo (registro, login, validación de credenciales), consulta y edición de perfil, personalización de elementos visuales (tablero/fichas), acceso a estadísticas y protección de rutas sin autenticar.
 * **Bloque 2: Sistema de amigos:** Comprueba el flujo de relaciones interpersonales, incluyendo envío y aceptación de solicitudes, actualización de las listas de amigos, rechazo de solicitudes duplicadas y eliminación de contactos.
-* **Bloque 3: Leaderboard global:** Verifica la existencia, formato y estructura de datos del ranking global, asegurando su correcto orden descendente basado en el ELO de los usuarios.
+* **Bloque 3: Leaderboard global:** Verifica la existencia, formato y estructura de datos del ranking global, asegurando su correcto orden descendente basado en el ELO y validando el sistema de paginación (limit/skip).
 
 ## `test_matchmaking.py`
 *Creación de partidas y comunicación en sala.*
@@ -15,6 +15,7 @@
 * **Bloque 3: Chat bidireccional en partida:** Verifica la entrega bidireccional y en tiempo real de la mensajería, comprobando la exactitud del remitente, la integridad del contenido y la gestión de mensajes vacíos.
 * **Bloque 4: Matchmaking y Salas de Espera (4P):** Valida la creación de salas públicas de 4 jugadores, su persistencia en el lobby durante el llenado progresivo y el sistema de invitaciones múltiples a amigos.
 * **Bloque 5: Sincronización y Chat (4P):** Asegura la asignación de 4 colores únicos, el handshake de preparación parcial (espera a 4/4 ready) y la propagación de mensajes en el chat grupal.
+* **Bloque 6: Lobby Resiliente y Autoridad (Kick/Bots):** Evalúa la gestión de la sala por parte del Host: expulsión de jugadores (kick), rellenado automático de huecos con bots (IA) y persistencia de la sala tras abandonos de invitados.
 
 ## `test_game_logic.py`
 *Motor de juego, reglas, sincronización y persistencia.*
@@ -25,6 +26,7 @@
 * **Bloque 4: Fin de partida y persistencia (1v1):** Evalúa el flujo de finalización mediante rendición, comprobando la declaración del ganador, la variación del ELO y el registro en el historial.
 * **Bloque 5: Motor de Juego y Reglas (4P):** Test de unidad sobre el tablero 16x16, validando el flanqueo multicolor (captura de múltiples colores en una línea) y el salto automático de turno para jugadores sin movimientos.
 * **Bloque 6: Fin de Partida, ELO y Estadísticas (4P):** Valida el cálculo de posiciones (1º a 4º), la distribución de ELO estilo "Battle Royale" y el registro del puesto obtenido en el historial del usuario.
+* **Bloque 7: IA y Empates Matemáticos:** Verifica la heurística de la IA en tableros de 16x16 y la resolución justa de empates múltiples (asignación de la misma posición a jugadores con igual puntuación).
 
 ## `test_resilience.py`
 *Estabilidad de red, reconexiones y aislamiento.*

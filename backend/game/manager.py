@@ -258,8 +258,22 @@ class GameManager:
         score = count_score_4p(game["board"])
         positions = dict(game.get("final_positions", {}))
         remaining = [p for p in PIECES_4P if game.get("username_by_piece", {}).get(p) and p not in positions]
-        remaining.sort(key=lambda p: (-score.get(p, 0), TURN_ORDER_4P.index(p)))
-        for p, pos in zip(remaining, [i for i in [1,2,3,4] if i not in positions.values()]): positions[p] = pos
+        
+        score_groups = {}
+        for p in remaining:
+            s = score.get(p, 0)
+            score_groups.setdefault(s, []).append(p)
+            
+        available_ranks = [i for i in [1, 2, 3, 4] if i not in positions.values()]
+        sorted_scores = sorted(score_groups.keys(), reverse=True)
+        
+        for s in sorted_scores:
+            if not available_ranks: break
+            rank = available_ranks[0] # Todos los empatados reciben este rango
+            for p in score_groups[s]:
+                positions[p] = rank
+                available_ranks.pop(0) # Se consume un puesto por cada jugador empatado
+                
         return positions
 
     async def _save_game_results_4p(self, game: dict):

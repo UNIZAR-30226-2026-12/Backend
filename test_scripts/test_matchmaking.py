@@ -554,6 +554,65 @@ async def run_4p_sync_chat_test():
 
 
 # ─────────────────────────────────────────────
+#  BLOQUE 6: LOBBY RESILIENTE, KICKS Y BOTS
+# ─────────────────────────────────────────────
+
+async def run_lobby_premium_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 6: LOBBY RESILIENTE, KICKS Y BOTS (4P)")
+    print("="*60)
+    # Ajustado para recoger también los 'ids' que devuelve tu función actual
+    users, tokens, ids = get_random_users(4)
+    host_t, g1_t, g2_t, g3_t = tokens
+    host_u, g1_u, g2_u, g3_u = users
+
+    try:
+        step(1, "Host crea la sala 4P publica...")
+        res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {host_t}"}, json={"mode": "1v1v1v1"})
+        game_id = res.json()["game_id"]
+        ok(f"Sala {game_id} creada")
+
+        step(2, "Invitado 1 entra y luego abandona (La sala de cristal)...")
+        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {g1_t}"})
+        res_leave = requests.post(f"{BASE_URL}/api/games/{game_id}/leave", headers={"Authorization": f"Bearer {g1_t}"})
+        assert res_leave.status_code == 200, f"Fallo al hacer leave: {res_leave.status_code} - {res_leave.text}"
+        
+        estado = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {host_t}"})
+        assert estado.status_code == 200, "¡La sala fue destruida erroneamente!"
+        assert len(estado.json()["players"]) == 1, "El jugador no fue borrado de la sala"
+        ok("El invitado salio pero la sala sigue intacta para el Host")
+
+        step(3, "Invitado 2 entra y el Host lo expulsa (Kick)...")
+        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {g2_t}"})
+        res_kick = requests.post(f"{BASE_URL}/api/games/{game_id}/kick/{g2_u}", headers={"Authorization": f"Bearer {host_t}"})
+        assert res_kick.status_code == 200, f"Error en kick: {res_kick.text}"
+        
+        estado = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {host_t}"})
+        assert not any(p["username"] == g2_u for p in estado.json()["players"]), "El jugador no fue expulsado"
+        ok("El jugador troll fue expulsado con exito por el Host")
+
+        step(4, "Host rellena los 3 huecos restantes con Bots (IA)...")
+        for _ in range(3):
+            res_bot = requests.post(f"{BASE_URL}/api/games/{game_id}/add_bot", headers={"Authorization": f"Bearer {host_t}"})
+            assert res_bot.status_code == 200, f"Error añadiendo bot: {res_bot.text}"
+        
+        estado_final = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {host_t}"})
+        bots = [p["username"] for p in estado_final.json()["players"] if p["username"].startswith("IA_")]
+        assert len(bots) == 3, "No se crearon los 3 bots"
+        assert estado_final.json()["status"] == "playing", "La partida no empezo automaticamente tras llenarse de bots"
+        ok(f"Bots inyectados correctamente: {bots}. La partida ha comenzado.")
+
+        print("\n  ✔ BLOQUE 6 PASADO: Resiliencia y Autoridad OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 6 FALLIDO: {e}")
+        return False
+    finally:
+        for t, u in zip(tokens, users): delete_user(t, u)
+
+
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -565,6 +624,7 @@ async def async_main():
     results["Chat bidireccional en partida"]          = await run_chat_test()
     results["Matchmaking y Salas de Espera (4P)"]     = await run_4p_matchmaking_test()
     results["Sincronizacion y Chat (4P)"]             = await run_4p_sync_chat_test()
+    results["Lobby Resiliente y Autoridad (Kick/Bots)"]= await run_lobby_premium_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")
