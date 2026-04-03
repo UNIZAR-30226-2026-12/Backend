@@ -75,7 +75,19 @@ async def get_public_lobbies():
         g_id = str(r["game_id"])
         if g_id not in game_manager.active_games:
             game_manager.create_game(creator_name=r["creator"], game_id=g_id, mode=normalize_mode(r["mode"]), participants=[r["creator"]])
-        lobbies.append({"game_id": g_id, "creator": r["creator"], "avatar_url": r["avatar_url"], "creator_rr": r["creator_rr"], "mode": r["mode"]})
+        game = game_manager.get_game_state(g_id) or {}
+        participants = game.get("participants", [])
+        expected = game.get("participant_count_expected", 4 if normalize_mode(r["mode"]) == "1v1v1v1" else 2)
+        lobbies.append({
+            "game_id": g_id,
+            "creator": r["creator"],
+            "avatar_url": r["avatar_url"],
+            "creator_rr": r["creator_rr"],
+            "mode": r["mode"],
+            "players": len(participants),
+            "max_players": expected,
+            "status": game.get("status", "waiting")
+        })
     return {"lobbies": lobbies}
 
 @router.post("/join/{game_id}")
@@ -96,9 +108,6 @@ async def join_public_lobby(game_id: str, current_user: dict = Depends(get_curre
             raise HTTPException(status_code=400, detail="La sala ya esta llena.")
         parts.append(current_user["username"])
         game.setdefault("players_ready", {})[current_user["username"]] = False
-
-    if len(parts) >= expected:
-        await database.execute("UPDATE lobbies SET status = 'playing' WHERE id = :id", {"id": int(game_id)})
 
     # Legado 1v1: Si es una partida de 2 y acaba de entrar el segundo, le asignamos blancas explícitamente
     if expected == 2 and len(parts) == 2 and not game.get("white_player"):
@@ -168,7 +177,7 @@ async def reject_invite(game_id: str, current_user: dict = Depends(get_current_u
 
 @router.post("/{game_id}/leave")
 async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_user)):
-    lobby = await database.fetch_one("SELECT id, creator_id, status, mode FROM lobbies WHERE id = :id", {"id": int(game_id)})
+    lobby = await database.fetch_one("SELECT id, creator_id, status, mode, is_public FROM lobbies WHERE id = :id", {"id": int(game_id)})
     if not lobby: raise HTTPException(status_code=404, detail="Sala no existe")
 
     game = game_manager.get_game_state(game_id)
@@ -181,15 +190,17 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(status_code=403, detail="No perteneces a sala")
     
     if lobby["status"] == "waiting":
-        if current_user["id"] == lobby["creator_id"] or lobby["mode"] in ("1vs1", "1v1"):
-            # Si se va el Host, o es 1v1, destruimos la sala entera
+        # En salas públicas, solo destruir si se va el host.
+        # Si se va un invitado (1v1 o 4p), se libera su hueco y la sala sigue viva.
+        should_destroy_room = current_user["id"] == lobby["creator_id"] or (not lobby["is_public"] and lobby["mode"] in ("1vs1", "1v1"))
+        if should_destroy_room:
             await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
             game_manager.remove_game(game_id)
             for p in parts_usernames:
                 if p != username:
                     await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
         else:
-            # En 4P, si se va un Guest, simplemente liberamos su hueco
+            # Si se va un guest, simplemente liberamos su hueco.
             await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
             
             if username in game.get("participants", []):
