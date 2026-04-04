@@ -94,6 +94,11 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         manager.disconnect_timers[timer_key].cancel()
         del manager.disconnect_timers[timer_key]
 
+    was_paused = username in game.get("paused_usernames", [])
+    if was_paused:
+        game_manager.resume_player(game_id, username)
+        await manager.broadcast_game_state(game_id, game_manager.get_game_state(game_id))
+
     await websocket.send_json({"type": "player_assignment", "payload": {"color": assigned_piece}})
     game.setdefault("players_ready", {})[username] = False
 
@@ -145,8 +150,21 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 await manager.broadcast(game_id, {"type": "chat_message", "payload": {"sender": username, "message": message.get("message")}})
                 continue
 
+            if action == "pause":
+                success, msg = game_manager.pause_player(game_id, username)
+                if success:
+                    await manager.broadcast_game_state(game_id, game_manager.get_game_state(game_id))
+                else:
+                    await manager.send_error(websocket, msg)
+                continue
+
             if action == "surrender":
-                success, msg = await game_manager.surrender_game(game_id, username if game.get("mode") == "1v1v1v1" else assigned_piece)
+                if game.get("mode") == "vs_ai":
+                    success, msg = await game_manager.surrender_game(game_id, assigned_piece)
+                else:
+                    # En partidas online (publicas o con amigos) tratamos "abandonar"
+                    # como abandono real del usuario para respetar las reglas de pausa/invalidez.
+                    success, msg = await game_manager.abandon_game(game_id, username)
                 if success:
                     ns = game_manager.get_game_state(game_id)
                     if ns and ns.get("game_over"): await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
@@ -208,6 +226,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
             return
 
         if game.get("status") == "playing" and not game.get("game_over"):
+            if username in game.get("paused_usernames", []):
+                return
+
             async def abandonment_task():
                 try:
                     await asyncio.sleep(30)

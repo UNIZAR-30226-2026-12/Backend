@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from persistence.database import database
 from auth.dependencies import get_current_user
 from friends.schemas import FriendRequest, ChatMessageCreate
+from game.manager import game_manager
 
 router = APIRouter()
 
@@ -157,12 +158,51 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     """
     game_invites_rows = await database.fetch_all(query=query_game_invites, values={"uid": current_user["id"]})
 
+    paused_games = []
+    current_username = current_user["username"]
+    for game_id, game in game_manager.active_games.items():
+        if game.get("mode") not in ("1v1", "1v1v1v1"):
+            continue
+        if not game.get("is_private"):
+            continue
+        if game.get("status") != "playing" or game.get("game_over"):
+            continue
+        participants = [u for u in game.get("participants", []) if u]
+        if current_username not in participants:
+            continue
+        paused_usernames = list(game.get("paused_usernames", []))
+        if current_username not in paused_usernames:
+            continue
+
+        if game.get("mode") == "1v1v1v1":
+            username_by_piece = game.get("username_by_piece", {})
+            active_usernames = [
+                username_by_piece.get(piece)
+                for piece in game.get("active_pieces", [])
+                if username_by_piece.get(piece)
+            ]
+        else:
+            active_usernames = list(participants)
+
+        remaining_others = [u for u in active_usernames if u != current_username]
+        if not remaining_others:
+            continue
+
+        paused_games.append({
+            "game_id": int(game_id),
+            "mode": "1vs1vs1vs1" if game.get("mode") == "1v1v1v1" else "1vs1",
+            "participants": participants,
+            "paused_by": paused_usernames,
+            "active_players": active_usernames,
+        })
+
     return {
         "friends": [
             {**dict(row), "status": "online"} for row in friends_rows # Mock status online
         ],
         "requests": [dict(row) for row in requests_rows],
-        "gameRequests": [dict(row) for row in game_invites_rows]
+        "gameRequests": [dict(row) for row in game_invites_rows],
+        "pausedGames": paused_games
     }
 
 @router.post("/request")

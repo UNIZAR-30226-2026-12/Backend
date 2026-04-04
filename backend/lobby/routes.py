@@ -45,7 +45,7 @@ async def get_lobby_participants(lobby_id: int) -> List[Dict]:
     return parts
 
 async def get_game_or_create_from_lobby(lobby_id: int) -> Tuple[dict, dict]:
-    lobby = await database.fetch_one("SELECT id, creator_id, mode, status FROM lobbies WHERE id = :id", {"id": lobby_id})
+    lobby = await database.fetch_one("SELECT id, creator_id, mode, status, is_public FROM lobbies WHERE id = :id", {"id": lobby_id})
     if not lobby: raise HTTPException(status_code=404, detail="Sala no encontrada")
 
     game_id = str(lobby_id)
@@ -54,7 +54,13 @@ async def get_game_or_create_from_lobby(lobby_id: int) -> Tuple[dict, dict]:
 
     parts = await get_lobby_participants(lobby_id)
     ordered = [p["username"] for p in sorted(parts, key=lambda p: p["invite_order"])]
-    game_manager.create_game(creator_name=ordered[0], game_id=game_id, mode=normalize_mode(lobby["mode"]), participants=ordered)
+    game_manager.create_game(
+        creator_name=ordered[0],
+        game_id=game_id,
+        mode=normalize_mode(lobby["mode"]),
+        participants=ordered,
+        is_private=not bool(lobby["is_public"]),
+    )
     return lobby, game_manager.get_game_state(game_id)
 
 @router.post("/create")
@@ -199,6 +205,7 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
             for p in parts_usernames:
                 if p != username:
                     await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
+            return {"status": "success", "message": "Has abandonado la sala"}
         else:
             # Si se va un guest, simplemente liberamos su hueco.
             await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
@@ -211,7 +218,7 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
             if creator_name:
                 await notifier.send_invite_response(target_username=creator_name, game_id=game_id, action="left", guest=username)
             await ws_manager.broadcast_game_state(game_id, game)
-        return {"status": "success"}
+            return {"status": "success", "message": "Has abandonado la sala"}
 
     if current_user["id"] != lobby["creator_id"]:
         await database.execute("UPDATE lobby_invites SET status = 'left' WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})

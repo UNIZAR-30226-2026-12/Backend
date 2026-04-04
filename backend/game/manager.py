@@ -13,6 +13,29 @@ class GameManager:
     def __init__(self):
         self.active_games: Dict[str, dict] = {}
 
+    def _refresh_paused_state(self, game: dict):
+        paused_usernames = list(dict.fromkeys(game.get("paused_usernames", [])))
+        participants = set(game.get("participants", []))
+        paused_usernames = [u for u in paused_usernames if u in participants]
+        game["paused_usernames"] = paused_usernames
+
+        paused_pieces: List[str] = []
+        if game.get("mode") == "1v1v1v1":
+            piece_by_username = game.get("piece_by_username", {})
+            for username in paused_usernames:
+                piece = piece_by_username.get(username)
+                if piece:
+                    paused_pieces.append(piece)
+        else:
+            black_player = game.get("black_player")
+            white_player = game.get("white_player")
+            for username in paused_usernames:
+                if username == black_player:
+                    paused_pieces.append("black")
+                elif username == white_player:
+                    paused_pieces.append("white")
+        game["paused_pieces"] = list(dict.fromkeys(paused_pieces))
+
     def create_game(self, creator_name: str, is_private: bool = False, game_id: str = None, mode: str = "1v1", invited_name: str = None, participants: Optional[List[str]] = None) -> str:
         if not game_id: game_id = str(uuid.uuid4())
 
@@ -45,6 +68,8 @@ class GameManager:
                 "username_by_piece": username_by_piece, "piece_by_username": piece_by_username,
                 "active_pieces": [piece for piece, username in username_by_piece.items() if username],
                 "abandoned_pieces": [], "final_positions": {},
+                "paused_usernames": [], "paused_pieces": [], "invalidated": False, "invalidated_pieces": [],
+                "is_private": bool(is_private),
                 "black_player": username_by_piece["black"], "white_player": username_by_piece["white"],
                 "red_player": username_by_piece["red"], "blue_player": username_by_piece["blue"],
             }
@@ -67,6 +92,8 @@ class GameManager:
             "saved": False, "players_ready": players_ready,
             "participants": [n for n in [black_player, white_player] if n and n != "IA"],
             "participant_count_expected": 1 if normalized_mode == "vs_ai" else 2,
+            "paused_usernames": [], "paused_pieces": [], "invalidated": False, "invalidated_pieces": [],
+            "is_private": bool(is_private),
         }
         return game_id
 
@@ -85,6 +112,35 @@ class GameManager:
         game = self.active_games.get(game_id)
         if game:
             game.setdefault("players_ready", {})[username] = ready
+
+    def pause_player(self, game_id: str, username: str) -> Tuple[bool, str]:
+        game = self.active_games.get(game_id)
+        if not game:
+            return False, "Partida no encontrada"
+        if game.get("mode") == "vs_ai":
+            return False, "No se puede pausar contra la IA"
+        if not game.get("is_private"):
+            return False, "Solo se pueden pausar partidas con amigos"
+        if game.get("status") != "playing" or game.get("game_over"):
+            return False, "La partida no esta en curso"
+        if username not in game.get("participants", []):
+            return False, "No perteneces a la partida"
+
+        paused = game.setdefault("paused_usernames", [])
+        if username not in paused:
+            paused.append(username)
+        self._refresh_paused_state(game)
+        return True, "Partida pausada"
+
+    def resume_player(self, game_id: str, username: str) -> Tuple[bool, str]:
+        game = self.active_games.get(game_id)
+        if not game:
+            return False, "Partida no encontrada"
+        paused = game.setdefault("paused_usernames", [])
+        if username in paused:
+            paused.remove(username)
+            self._refresh_paused_state(game)
+        return True, "Partida reanudada"
 
     def are_all_players_ready(self, game_id: str) -> bool:
         game = self.active_games.get(game_id)
@@ -126,6 +182,7 @@ class GameManager:
         if not game: return False, "Partida no encontrada"
         if game["status"] == "waiting": return False, "La partida aun no ha empezado"
         if game["game_over"]: return False, "La partida ya ha terminado"
+        if player in game.get("paused_pieces", []): return False, "Jugador en pausa"
 
         if game.get("mode") == "1v1v1v1":
             if player not in game.get("active_pieces", []): return False, "Jugador no activo"
@@ -193,13 +250,76 @@ class GameManager:
         game = self.active_games.get(game_id)
         if not game or game["game_over"] or game["status"] != "playing": return False, "Abandono ignorado"
 
-        if game.get("mode") == "1v1v1v1":
+        mode = game.get("mode")
+        paused_usernames = game.get("paused_usernames", [])
+        disconnected_was_paused = disconnected_username in paused_usernames
+        if paused_usernames and not disconnected_was_paused:
+            if mode == "1v1":
+                game["invalidated"] = True
+                game["game_over"] = True
+                game["winner"] = None
+                game["current_player"] = None
+                game["status"] = "finished"
+                game["valid_moves"] = []
+                game["paused_usernames"] = []
+                game["paused_pieces"] = []
+                return True, f"{disconnected_username} abandono y la partida ha sido invalidada sin cambios de RR"
+
+            if mode == "1v1v1v1":
+                piece = game.get("piece_by_username", {}).get(disconnected_username)
+                if not piece or piece not in game.get("active_pieces", []):
+                    return False, "Jugador inactivo"
+
+                game["active_pieces"].remove(piece)
+                abandoned_pieces = game.setdefault("abandoned_pieces", [])
+                if piece not in abandoned_pieces:
+                    abandoned_pieces.append(piece)
+                invalidated_pieces = game.setdefault("invalidated_pieces", [])
+                if piece not in invalidated_pieces:
+                    invalidated_pieces.append(piece)
+                game.setdefault("final_positions", {})[piece] = 4
+                game["score"] = count_score_4p(game["board"])
+
+                if len(game.get("active_pieces", [])) < 2:
+                    game["invalidated"] = True
+                    game["game_over"] = True
+                    game["winner"] = None
+                    game["current_player"] = None
+                    game["status"] = "finished"
+                    game["valid_moves"] = []
+                    game["paused_usernames"] = []
+                    game["paused_pieces"] = []
+                    return True, f"{disconnected_username} abandono y la partida ha sido invalidada sin cambios de RR"
+
+                self._refresh_paused_state(game)
+                self._finalize_if_finished_4p(game)
+
+                if game["game_over"]:
+                    await self.save_game_results(game_id)
+                    return True, f"{disconnected_username} abandono y la partida finalizo sin cambios de RR para ese jugador"
+
+                if game.get("current_player") == piece:
+                    next_piece = self._next_piece_with_moves_4p(game, piece)
+                    if next_piece is None:
+                        game["game_over"] = True
+                        game["status"] = "finished"
+                        game["current_player"] = None
+                        game["winner"] = "draw"
+                        await self.save_game_results(game_id)
+                    else:
+                        game["current_player"] = next_piece
+                        game["valid_moves"] = get_valid_moves_4p(game["board"], next_piece)
+                return True, f"{disconnected_username} abandono la partida pausada sin cambios de RR para ese jugador"
+
+        if mode == "1v1v1v1":
             piece = game.get("piece_by_username", {}).get(disconnected_username)
             if not piece or piece not in game.get("active_pieces", []): return False, "Jugador inactivo"
             game["active_pieces"].remove(piece)
             game.setdefault("abandoned_pieces", []).append(piece)
             game.setdefault("final_positions", {})[piece] = 4
             game["score"] = count_score_4p(game["board"])
+            game.get("paused_usernames", [])[:] = [u for u in game.get("paused_usernames", []) if u != disconnected_username]
+            self._refresh_paused_state(game)
             self._finalize_if_finished_4p(game)
             if game["game_over"]:
                 await self.save_game_results(game_id)
@@ -222,6 +342,8 @@ class GameManager:
         elif game.get("white_player") == disconnected_username: game["winner"] = "black"
         else: return False, "Jugador no encontrado"
 
+        game.get("paused_usernames", [])[:] = [u for u in game.get("paused_usernames", []) if u != disconnected_username]
+        self._refresh_paused_state(game)
         game["game_over"] = True
         game["current_player"] = None
         game["status"] = "finished"
@@ -255,16 +377,28 @@ class GameManager:
         await update_db(w_usr, w_ch, res_w, s_w, 'white', black_name)
 
     def _compute_positions_4p(self, game: dict) -> Dict[str, int]:
+        invalidated_pieces = set(game.get("invalidated_pieces", []))
+        valid_pieces = [
+            p for p in PIECES_4P
+            if game.get("username_by_piece", {}).get(p) and p not in invalidated_pieces
+        ]
+        if not valid_pieces:
+            return {}
+
         score = count_score_4p(game["board"])
-        positions = dict(game.get("final_positions", {}))
-        remaining = [p for p in PIECES_4P if game.get("username_by_piece", {}).get(p) and p not in positions]
+        positions = {
+            piece: rank
+            for piece, rank in dict(game.get("final_positions", {})).items()
+            if piece in valid_pieces
+        }
+        remaining = [p for p in valid_pieces if p not in positions]
         
         score_groups = {}
         for p in remaining:
             s = score.get(p, 0)
             score_groups.setdefault(s, []).append(p)
             
-        available_ranks = [i for i in [1, 2, 3, 4] if i not in positions.values()]
+        available_ranks = [i for i in range(1, len(valid_pieces) + 1) if i not in positions.values()]
         sorted_scores = sorted(score_groups.keys(), reverse=True)
         
         for s in sorted_scores:
@@ -280,11 +414,17 @@ class GameManager:
         positions = self._compute_positions_4p(game)
         rr_map = {1: 50, 2: 25, 3: 0, 4: -25}
         score = count_score_4p(game["board"])
-        parts = [u for u in game.get("participants", []) if u]
+        invalidated_pieces = set(game.get("invalidated_pieces", []))
+        valid_usernames = [
+            game.get("username_by_piece", {}).get(piece)
+            for piece in PIECES_4P
+            if game.get("username_by_piece", {}).get(piece) and piece not in invalidated_pieces
+        ]
+        parts = [u for u in valid_usernames if u]
         
         for piece in PIECES_4P:
             un = game.get("username_by_piece", {}).get(piece)
-            if not un: continue
+            if not un or piece in invalidated_pieces: continue
             row = await database.fetch_one("SELECT id, elo FROM users WHERE username = :un", {"un": un})
             if not row: continue
             pos = positions.get(piece, 4)
@@ -296,6 +436,9 @@ class GameManager:
 
     async def save_game_results(self, game_id: str):
         game = self.active_games.get(game_id)
+        if game and game.get("invalidated"):
+            game["saved"] = True
+            return
         if game and not game.get("saved"):
             game["saved"] = True
             if game.get("mode") == "1v1v1v1": await self._save_game_results_4p(game)
