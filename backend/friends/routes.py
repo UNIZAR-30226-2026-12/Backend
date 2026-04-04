@@ -48,7 +48,7 @@ async def assert_accepted_friendship(current_user_id: int, friend_id: int):
         raise HTTPException(status_code=403, detail="Solo puedes chatear con amigos aceptados")
 
 
-@router.get("/")
+@router.get("")
 async def list_friends(current_user: dict = Depends(get_current_user)):
     await ensure_friend_chat_table()
     await database.execute(

@@ -3,7 +3,7 @@ from persistence.database import database
 
 router = APIRouter()
 
-@router.get("/")
+@router.get("")
 async def get_global_ranking(limit: int = Query(50, ge=1, le=100), skip: int = Query(0, ge=0)):
     """
     Obtiene el Top de jugadores globales ordenados por ELO (RR).
