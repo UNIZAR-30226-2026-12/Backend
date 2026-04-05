@@ -196,9 +196,13 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(status_code=403, detail="No perteneces a sala")
     
     if lobby["status"] == "waiting":
-        # En salas públicas, solo destruir si se va el host.
-        # Si se va un invitado (1v1 o 4p), se libera su hueco y la sala sigue viva.
-        should_destroy_room = current_user["id"] == lobby["creator_id"] or (not lobby["is_public"] and lobby["mode"] in ("1vs1", "1v1"))
+        # Solo destruir la sala si el que se va es el creador (Host).
+        # Si se va un invitado, la sala sigue abierta para que el host espere a otro.
+        creator_id = int(lobby["creator_id"])
+        user_id = int(current_user["id"])
+        should_destroy_room = user_id == creator_id
+        print(f"LOBBY DEBUG: User {username} (ID {user_id}) leaves room {game_id}. Creator ID is {creator_id}. Should destroy? {should_destroy_room}")
+        
         if should_destroy_room:
             await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
             game_manager.remove_game(game_id)
