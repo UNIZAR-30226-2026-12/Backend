@@ -385,6 +385,15 @@ password=MiClaveSecreta
   ],
   "gameRequests": [
      { "id": 8, "name": "Invitador_XYZ", "rr": 1050, "avatar_url": "...", "gameMode": "1vs1", "lobby_id": 14 }
+  ],
+  "pausedGames": [
+     {
+       "game_id": 124,
+       "mode": "1vs1",
+       "participants": ["Juan", "Pedro"],
+       "paused_by": ["Juan"],
+       "active_players": ["Juan", "Pedro"]
+     }
   ]
 }
 ```
@@ -680,5 +689,20 @@ Como los WebSockets estándar no envían cabeceras de autorización custom fáci
 
 ### B. Canal de Partida Activa
 `ws://host:port/ws/play/{game_id}?token={tu_token}`
-- Permite hacer `make_move`, `chat`, `surrender`.
-- Devuelve Broadcasts constantes: `game_state_update` (el tablero completo JSON, dictando turnos y si perdiste o ganaste).
+
+#### 📤 Acciones del Cliente (JSON):
+- `{"action": "set_ready", "ready": true|false}`: Indicar que estás listo en el lobby.
+- `{"action": "make_move", "row": 0, "col": 0}`: Realizar un movimiento en el tablero.
+- `{"action": "chat", "message": "Hola!"}`: Enviar un mensaje de chat a los demás jugadores de la partida.
+- `{"action": "pause"}`: Pausar/Despausar la partida (Solo disponible en partidas privadas con amigos).
+- `{"action": "surrender"}`: Rendirse o abandonar la partida en curso.
+
+#### 📥 Mensajes del Servidor (JSON):
+- `{"type": "room_sync", "payload": {...}}`: Sincronización de los jugadores en el lobby (RR, avatares, estado listo).
+- `{"type": "player_assignment", "payload": {"color": "black|white|red|blue"}}`: Asigna tu color/pieza al conectar.
+- `{"type": "waiting_for_player", "payload": {"message": "..."}}`: Mensaje informativo de espera de jugadores.
+- `{"type": "game_state_update", "payload": {...}}`: Estado completo del tablero y la partida.
+  - Incluye `paused_usernames`: Lista de usuarios que han pausado la partida.
+- `{"type": "chat_message", "payload": {"sender": "User", "message": "..."}}`: Nuevo mensaje de chat recibido.
+- `{"type": "error", "payload": {"message": "..."}}`: Notificación de error (movimiento inválido, etc).
+- `{"type": "invite_response", "payload": {"action": "room_closed|left|kicked", ...}}`: Notificación de cierre de sala o expulsión.
