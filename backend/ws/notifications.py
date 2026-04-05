@@ -39,6 +39,10 @@ class NotificationManager:
                 message = f"{guest} ha rechazado tu invitación."
             elif action == "left":
                 message = f"{guest} ha abandonado la sala."
+            elif action == "room_closed":
+                message = f"El host {guest} ha abandonado la sala. La partida ha sido cancelada."
+            elif action == "kicked":
+                message = f"Has sido expulsado de la sala por {guest}."
 
             await self.active_users[target_username].send_json({
                 "type": "invite_response",

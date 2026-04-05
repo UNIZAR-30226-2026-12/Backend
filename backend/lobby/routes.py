@@ -174,7 +174,7 @@ async def reject_invite(game_id: str, current_user: dict = Depends(get_current_u
         await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
         game_manager.remove_game(game_id)
         for un in [p["username"] for p in parts if p["username"] != current_user["username"]]:
-            await notifier.send_invite_response(target_username=un, game_id=game_id, action="rejected", guest=current_user["username"])
+            await notifier.send_invite_response(target_username=un, game_id=game_id, action="room_closed", guest=current_user["username"])
     else:
         # En 4P, solo avisamos al host y no destruimos la sala
         await notifier.send_invite_response(target_username=lobby["creator_username"], game_id=game_id, action="rejected", guest=current_user["username"])
@@ -204,8 +204,8 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
             game_manager.remove_game(game_id)
             for p in parts_usernames:
                 if p != username:
-                    await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
-            return {"status": "success", "message": "Has abandonado la sala"}
+                    await notifier.send_invite_response(target_username=p, game_id=game_id, action="room_closed", guest=username)
+            return {"status": "success", "message": "Has abandonado la sala y la partida se ha cancelado"}
         else:
             # Si se va un guest, simplemente liberamos su hueco.
             await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
@@ -262,11 +262,9 @@ async def set_ready(game_id: str, body: ReadyRequest, current_user: dict = Depen
     lobby = await database.fetch_one("SELECT id, creator_id FROM lobbies WHERE id = :id", {"id": int(game_id)})
     if not lobby: raise HTTPException(status_code=404, detail="Sala no encontrada")
     
-    invite = await database.fetch_one("SELECT status FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", {"id": int(game_id), "uid": current_user["id"]})
-    if current_user["id"] != lobby["creator_id"] and not invite: raise HTTPException(status_code=403, detail="No perteneces a la sala")
-    if invite and invite["status"] != "accepted": raise HTTPException(status_code=403, detail="Debes aceptar primero")
-
     _, game = await get_game_or_create_from_lobby(int(game_id))
+    if current_user["username"] not in game.get("participants", []):
+        raise HTTPException(status_code=403, detail="No perteneces a la sala")
     game_manager.set_player_ready(game_id, current_user["username"], body.ready)
     if game_manager.are_all_players_ready(game_id):
         game_manager.set_game_playing(game_id)
