@@ -1,5 +1,6 @@
 import asyncio
 import json
+import html
 from typing import List, Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -73,8 +74,17 @@ def ensure_user_assigned_to_game(game: dict, username: str) -> Optional[str]:
         return "white"
     return None
 
+def schedule_room_cleanup(g_id: str, delay: int = 5):
+    async def cleanup_task():
+        await asyncio.sleep(delay)
+        game_manager.remove_game(g_id)
+    asyncio.create_task(cleanup_task())
+
 @router.websocket("/play/{game_id}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Query(...)):
+    if not game_id.isdigit():
+        await websocket.accept(); await websocket.close(code=1008, reason="ID invalido"); return
+
     user = await verify_token_ws(token)
     if not user:
         await websocket.accept(); await websocket.close(code=1008, reason="Token invalido"); return
@@ -147,7 +157,10 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 continue
 
             if action == "chat":
-                await manager.broadcast(game_id, {"type": "chat_message", "payload": {"sender": username, "message": message.get("message")}})
+                raw_msg = str(message.get("message", ""))[:280]
+                msg_txt = html.escape(raw_msg)
+                if msg_txt.strip():
+                    await manager.broadcast(game_id, {"type": "chat_message", "payload": {"sender": username, "message": msg_txt}})
                 continue
 
             if action == "pause":
@@ -167,16 +180,32 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     success, msg = await game_manager.abandon_game(game_id, username)
                 if success:
                     ns = game_manager.get_game_state(game_id)
-                    if ns and ns.get("game_over"): await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                    if ns and ns.get("game_over"): 
+                        await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                        schedule_room_cleanup(game_id)
                     await manager.broadcast_game_state(game_id, ns)
                 else: await manager.send_error(websocket, msg)
                 continue
 
             if action == "make_move":
+                row = message.get("row")
+                col = message.get("col")
+                
+                if not isinstance(row, int) or not isinstance(col, int):
+                    await manager.send_error(websocket, "Formato de coordenadas invalido (deben ser numeros)")
+                    continue
+                
+                mode = game.get("mode", "1v1")
+                max_size = 16 if mode in ("1v1v1v1", "1vs1vs1vs1") else 8
+                if row < 0 or row >= max_size or col < 0 or col >= max_size:
+                    await manager.send_error(websocket, "Coordenadas fuera del tablero")
+                    continue
                 success, msg = await game_manager.make_move(game_id, assigned_piece, message.get("row"), message.get("col"))
                 if success:
                     ns = game_manager.get_game_state(game_id)
-                    if ns and ns.get("game_over"): await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                    if ns and ns.get("game_over"): 
+                        await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                        schedule_room_cleanup(game_id)
                     await manager.broadcast_game_state(game_id, ns)
 
                     def check_and_trigger_ai(current_state):
@@ -192,6 +221,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                         if is_1v1_ai or is_4p_ai:
                             async def play_ai_turn():
                                 await asyncio.sleep(0.5)
+                                if not game_manager.get_game_state(game_id): return
+                                if game_manager.get_game_state(game_id).get("paused_usernames"): return
                                 if is_4p_ai:
                                     ai_move = await asyncio.to_thread(get_best_ai_move_4p, current_state["board"], c_player)
                                     r, c = (ai_move["row"], ai_move["col"]) if ai_move else (None, None)
@@ -205,6 +236,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                                         ais = game_manager.get_game_state(game_id)
                                         if ais and ais.get("game_over"): 
                                             await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                                            schedule_room_cleanup(game_id)
                                         await manager.broadcast_game_state(game_id, ais)
                                         
                                         check_and_trigger_ai(ais)
@@ -275,9 +307,15 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     suc, _ = await game_manager.abandon_game(game_id, username)
                     if suc:
                         ns = game_manager.get_game_state(game_id)
-                        if ns and ns.get("game_over"): await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                        if ns and ns.get("game_over"): 
+                            await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                            schedule_room_cleanup(game_id)
                         await manager.broadcast_game_state(game_id, ns)
-                except asyncio.CancelledError: pass
+                except asyncio.CancelledError: 
+                        pass
+                finally:
+                    if timer_key in manager.disconnect_timers:
+                        del manager.disconnect_timers[timer_key]
             manager.disconnect_timers[timer_key] = asyncio.create_task(abandonment_task())
 
 @router.websocket("/notifications")

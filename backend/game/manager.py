@@ -180,8 +180,8 @@ class GameManager:
     async def make_move(self, game_id: str, player: str, row: int, col: int) -> Tuple[bool, str]:
         game = self.active_games.get(game_id)
         if not game: return False, "Partida no encontrada"
-        if game["status"] == "waiting": return False, "La partida aun no ha empezado"
-        if game["game_over"]: return False, "La partida ya ha terminado"
+        if game.get("status") != "playing": return False, "La partida no esta en curso"
+        if game.get("game_over") or game.get("invalidated"): return False, "La partida ha terminado o es invalida"
         if player in game.get("paused_pieces", []): return False, "Jugador en pausa"
 
         if game.get("mode") == "1v1v1v1":

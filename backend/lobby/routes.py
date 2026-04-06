@@ -316,7 +316,9 @@ async def add_bot(game_id: str, current_user: dict = Depends(get_current_user)):
     if len(parts) >= expected: raise HTTPException(status_code=400, detail="La sala ya esta llena")
     
     # Asignar IA
-    bot_num = len([p for p in parts if p.startswith("IA_")]) + 1
+    bot_num = 1
+    while f"IA_{bot_num}" in parts:
+        bot_num += 1
     bot_name = f"IA_{bot_num}"
     parts.append(bot_name)
     game.setdefault("players_ready", {})[bot_name] = True

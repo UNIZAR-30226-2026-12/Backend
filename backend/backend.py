@@ -2,6 +2,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback
 
 # --- Imports de Dominio (Ordenados Alfabéticamente) ---
 from auth.routes import router as auth_router
@@ -18,6 +21,16 @@ Endpoints del Backend ---> mirar en APIDOCS.md
 """
 
 app = FastAPI(title="Reversi AI Backend")
+
+# --- Manejo Global de Excepciones ---
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"CRITICAL ERROR AVOIDED: {exc}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Ha ocurrido un error interno en el servidor. Inténtalo más tarde."},
+    )
 
 # --- Configuracion de Archivos Estáticos ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
