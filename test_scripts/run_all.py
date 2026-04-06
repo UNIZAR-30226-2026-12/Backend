@@ -24,9 +24,9 @@ def run_all_tests():
 
     for test_file in test_files:
         test_path = os.path.join(test_dir, test_file)
-        print(f"{"="*50}")
+        print("="*50    )
         print(f"EJECUTANDO: {test_file}")
-        print(f"{"="*50}")
+        print("="*50)
         
         # Ejecuta el script como un subproceso
         result = subprocess.run([sys.executable, test_path], capture_output=False)
@@ -41,9 +41,9 @@ def run_all_tests():
     end_time = time.time()
     
     # Resumen Final
-    print(f"\n{"#"*50}")
+    print("="*50)
     print("RESUMEN DE TESTS")
-    print(f"{"#"*50}")
+    print("="*50)
     print(f"Tiempo total: {round(end_time - start_time, 2)} segundos")
     print(f"Tests Pasados: {len(passed_tests)}/{len(test_files)}")
     
