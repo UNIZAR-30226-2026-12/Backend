@@ -2,14 +2,14 @@
 
 ## 📋 Tabla de Contenidos
 - [Setup](#setup)
-- [Autenticación](#autenticación)
+- [🔐 Autenticación](#autenticación)
 - [Endpoints REST](#endpoints-rest)
-  - [Auth](#auth-apiauth)
-  - [Users & Avatar](#users--avatar-apiusers)
-  - [Friends](#friends-apifriends)
-  - [Games & Lobby](#games--lobby-apigames)
-  - [Ranking](#ranking-apiranking)
-- [WebSockets](#websockets)
+  - [🔐 Auth](#auth-apiauth)
+  - [👤 Users & Avatar](#users--avatar-apiusers)
+  - [🤝 Friends](#friends-apifriends)
+  - [🎮 Games & Lobby](#games--lobby-apigames)
+  - [🏆 Ranking](#ranking-apiranking)
+- [⚡ WebSockets](#websockets)
 
 ---
 
@@ -25,10 +25,10 @@ Content-Type: application/json
 
 ---
 
-## Autenticación
+## 🔐 Autenticación
 
 **Manejo de Errores Común:**
-- `401 Unauthorized` → Token inválido, faltante o expirado → Se requiere un nuevo login.
+- `401 Unauthorized` → `token` inválido, faltante o expirado → Se requiere un nuevo login.
 - `400 Bad Request` → Errores de validación o lógica del negocio → Leer el atributo `detail` adjunto.
 - `404 Not Found` → Recurso o usuario inexistente.
 - `403 Forbidden` → Permisos insuficientes (Ej. intentar chatear con alguien que no es amigo).
@@ -37,7 +37,7 @@ Content-Type: application/json
 
 ## Endpoints REST
 
-### AUTH (`/api/auth`)
+### 🔐 AUTH (`/api/auth`)
 
 #### 🔵 POST `/api/auth/register` *(Público)*
 **Crear un nuevo usuario.** Asigna un ELO base de 1000 por defecto.
@@ -125,7 +125,7 @@ password=MiClaveSecreta
 
 ---
 
-### USERS & AVATAR (`/api/users`)
+### 👤 USERS & AVATAR (`/api/users`)
 
 #### 🟢 GET `/api/users/me`
 **Obtener los datos principales del perfil en sesión**
@@ -369,7 +369,7 @@ password=MiClaveSecreta
 
 ---
 
-### FRIENDS (`/api/friends`)
+### 🤝 FRIENDS (`/api/friends`)
 
 #### 🟢 GET `/api/friends`
 **Panel principal social: Tus amigos offline/online, solicitudes entrantes y retos (invitaciones a salas).**
@@ -493,6 +493,8 @@ password=MiClaveSecreta
 
 ---
 
+### 🏆 RANKING (`/api/ranking`)
+
 #### 🟢 GET `/api/ranking/`
 **Ranking global de jugadores.** Por defecto devuelve el Top 50.
 
@@ -516,12 +518,12 @@ password=MiClaveSecreta
 
 ---
 
-### GAMES & LOBBY (`/api/games`)
+### 🎮 GAMES & LOBBY (`/api/games`)
 
 #### 🔵 POST `/api/games/create`
 **Crea un Lobby público (Matchmaking general).**
 
-**Body:**
+**Body requerido:**
 ```json
 {
   "mode": "1vs1" | "1vs1vs1vs1" | "vs_ai"
@@ -551,7 +553,10 @@ password=MiClaveSecreta
       "creator": "Juan",
       "avatar_url": "...",
       "creator_rr": 1050,
-      "mode": "1vs1"
+      "mode": "1v1v1v1",
+      "players": 2,
+      "max_players": 4,
+      "status": "waiting"
     }
   ]
 }
@@ -575,7 +580,7 @@ password=MiClaveSecreta
 #### 🔵 POST `/api/games/invite`
 **Crea lobby privado e inyecta push ws al amigo para invitarlo de inmediato.**
 
-**Body:**
+**Body requerido:**
 ```json
 {
   "friend_ids": [2],
@@ -617,6 +622,27 @@ password=MiClaveSecreta
 {
   "status": "success",
   "message": "Has abandonado la sala"
+}
+```
+
+---
+
+#### 🔵 POST `/api/games/{game_id}/ready`
+**Marcar al jugador como 'Listo' o 'No Listo' en la sala de espera.**
+
+**Body requerido:**
+```json
+{
+  "ready": true
+}
+```
+
+**Respuesta (200):**
+```json
+{
+  "status": "success",
+  "ready": true,
+  "game_status": "waiting"
 }
 ```
 
@@ -678,9 +704,9 @@ password=MiClaveSecreta
 
 ---
 
-## WebSockets
+## ⚡ WebSockets
 
-Como los WebSockets estándar no envían cabeceras de autorización custom fácilmente, se usa Query Parameters: `?token=...`
+Como los `WebSockets` estándar no envían cabeceras de autorización custom fácilmente, se usa `Query Parameters`: `?token=...`
 
 ### A. Canal de Notificaciones Globales
 `ws://host:port/ws/notifications?token={tu_token}`
@@ -693,12 +719,21 @@ Como los WebSockets estándar no envían cabeceras de autorización custom fáci
 #### 📤 Acciones del Cliente (JSON):
 - `{"action": "set_ready", "ready": true|false}`: Indicar que estás listo en el lobby.
 - `{"action": "make_move", "row": 0, "col": 0}`: Realizar un movimiento en el tablero.
-- `{"action": "chat", "message": "Hola!"}`: Enviar un mensaje de chat a los demás jugadores de la partida.
+- `{"action": "chat", "message": "Hola!"}`: Enviar un mensaje de chat (Limitado a **280 caracteres**. Soporta sanitización `XSS` automática).
 - `{"action": "pause"}`: Pausar/Despausar la partida (Solo disponible en partidas privadas con amigos).
 - `{"action": "surrender"}`: Rendirse o abandonar la partida en curso.
 
+> [!IMPORTANT]
+> **Restricciones de Seguridad Críticas:**
+> - **Rate Limiting:** Se permite un máximo de 1 mensaje (cualquier acción) cada **0.5 segundos** por cliente para prevenir ataques de denegación de servicio o spam.
+> - **Tipado Estricto:** Las coordenadas `row` y `col` deben ser estrictamente números enteros (`int`). El envío de tipos incorrectos provocará el cierre de la conexión por el servidor.
+
+> [!TIP]
+> **Optimización de Rendimiento (AI):**
+> El motor de la `IA` se ejecuta en hilos secundarios mediante `asyncio.to_thread`. Esto garantiza que el `Event Loop` del servidor nunca se bloquee, manteniendo la latencia mínima incluso en tableros de `16x16`.
+
 #### 📥 Mensajes del Servidor (JSON):
-- `{"type": "room_sync", "payload": {...}}`: Sincronización de los jugadores en el lobby (RR, avatares, estado listo).
+- `{"type": "room_sync", "payload": {...}}`: Sincronización de los jugadores en el lobby (`RR`, avatares, estado listo).
 - `{"type": "player_assignment", "payload": {"color": "black|white|red|blue"}}`: Asigna tu color/pieza al conectar.
 - `{"type": "waiting_for_player", "payload": {"message": "..."}}`: Mensaje informativo de espera de jugadores.
 - `{"type": "game_state_update", "payload": {...}}`: Estado completo del tablero y la partida.
