@@ -98,7 +98,10 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
     if not assigned_piece:
         await websocket.accept(); await websocket.send_json({"type": "error", "payload": {"message": "La sala esta llena"}}); await websocket.close(); return
 
-    await manager.connect(websocket, game_id)
+    connected = await manager.connect(websocket, game_id, username)
+    if not connected:
+        return
+        
     timer_key = f"{game_id}_{username}"
     if timer_key in manager.disconnect_timers:
         manager.disconnect_timers[timer_key].cancel()
@@ -129,8 +132,16 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
             })
 
     try:
+        last_message_time: float = 0.0
+        
         while True:
             data = await websocket.receive_text()
+            
+            # ANTI-SPAM (maximo un mensaje cada 0.5s)
+            now = time.monotonic()
+            if now - last_message_time < 0.5:
+                continue  # Ignorar mensaje
+            last_message_time = now
             
             # PROTECCION ANTI-BASURA DE RED
             try: message = json.loads(data)
@@ -175,8 +186,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 if game.get("mode") == "vs_ai":
                     success, msg = await game_manager.surrender_game(game_id, assigned_piece)
                 else:
-                    # En partidas online (publicas o con amigos) tratamos "abandonar"
-                    # como abandono real del usuario para respetar las reglas de pausa/invalidez.
+                    # En partidas online tratamos "abandonar" como abandono real
                     success, msg = await game_manager.abandon_game(game_id, username)
                 if success:
                     ns = game_manager.get_game_state(game_id)
@@ -200,6 +210,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 if row < 0 or row >= max_size or col < 0 or col >= max_size:
                     await manager.send_error(websocket, "Coordenadas fuera del tablero")
                     continue
+
                 success, msg = await game_manager.make_move(game_id, assigned_piece, message.get("row"), message.get("col"))
                 if success:
                     ns = game_manager.get_game_state(game_id)
@@ -249,51 +260,34 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 continue
 
     except (WebSocketDisconnect, RuntimeError):
-        manager.disconnect(websocket, game_id)
+        manager.disconnect(websocket, game_id, username)
         if not (game := game_manager.get_game_state(game_id)): return
 
         if game.get("status") == "waiting":
-            # Si el host de una partida pública se desconecta, cerramos la sala para evitar "fantasmas" en la lista
             lobby = await database.fetch_one("SELECT creator_id, is_public, id FROM lobbies WHERE id = :id", {"id": int(game_id)})
-            
-            # Asegurar comparacion de enteros para evitar errores de tipo
             is_host = lobby and int(lobby["creator_id"]) == int(user["id"])
             is_public = lobby and lobby["is_public"]
-            print(f"WS DEBUG: {username} (Host={is_host}, Public={is_public}) disconnected from room {game_id}")
             
             if is_host and is_public:
-                # Destruir lobby público porque el host se ha ido
                 await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
                 game_manager.remove_game(game_id)
-                
-                # Desconectar a todos los demás de este socket de sala enviando mensaje de error
                 await manager.broadcast(game_id, {"type": "error", "payload": {"message": "El host ha abandonado la sala. Partida cancelada."}})
                 
-                # Notificar por el canal de notificaciones global que la sala se ha cerrado
                 parts = game.get("participants", [])
                 for p in parts:
                     if p != username:
-                        print(f"WS DEBUG: Sending room_closed to {p}")
                         await notifier.send_invite_response(target_username=p, game_id=game_id, action="room_closed", guest=username)
             else:
-                # Si se va un invitado o un host de partida privada, lo quitamos del estado de juego
                 if username in game.get("participants", []):
                     game["participants"].remove(username)
                     game.get("players_ready", {}).pop(username, None)
-                    
-                    # Si es una partida privada/invitación, marcar en DB como que se ha ido
                     await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", 
                                         {"id": int(game_id), "uid": user["id"]})
                 
-                # Sincronizar el estado (ahora falta un jugador)
                 await broadcast_room_sync(game_id)
-
-                # Notificar a otros que alguien se ha ido (pero la sala SIGUE abierta)
-                # Usar action="left" en lugar de "room_closed"
                 parts = game.get("participants", [])
                 for p in parts:
                     if p != username:
-                        print(f"WS DEBUG: Sending left action to {p}")
                         await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
             return
 

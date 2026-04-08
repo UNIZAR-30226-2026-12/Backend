@@ -1,3 +1,4 @@
+import asyncio
 from typing import Dict, List, Tuple
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -118,6 +119,10 @@ async def join_public_lobby(game_id: str, current_user: dict = Depends(get_curre
     # Legado 1v1: Si es una partida de 2 y acaba de entrar el segundo, le asignamos blancas explícitamente
     if expected == 2 and len(parts) == 2 and not game.get("white_player"):
         game["white_player"] = current_user["username"]
+
+    # Si la sala acaba de llenarse, marcarla como playing para que desaparezca del lobby público
+    if len(parts) >= expected:
+        await database.execute("UPDATE lobbies SET status = 'playing' WHERE id = :id", {"id": int(game_id)})
 
     return {"status": "success", "game_id": game_id}
 
