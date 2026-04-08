@@ -478,6 +478,7 @@ async def run_endgame_test():
                 await safe_recv(ws1, label=f"init-{u1}")
                 await safe_recv(ws2, label=f"init-{u2}")
 
+            await asyncio.sleep(0.6) # Anti-spam bypass (evita que el servidor ignore el mensaje por llegar en <0.5s)
             rendicion = {"action": "surrender", "player": "black"}
             await ws1.send(json.dumps(rendicion))
             debug(f"Rendicion enviada: {rendicion}")
@@ -730,6 +731,122 @@ async def run_fair_ties_and_ai_test():
         return False
 
 # ─────────────────────────────────────────────
+#  BLOQUE 8: BLOQUEO DE DOBLE CONEXION
+# ─────────────────────────────────────────────
+
+async def run_double_connection_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 8: BLOQUEO DE DOBLE CONEXION WS")
+    print("="*60)
+    u1 = f"sec_dbl_{uuid.uuid4().hex[:4]}"
+    token = None
+    try:
+        step(1, f"Creando sala publica con '{u1}'...")
+        token = create_and_login(u1)
+        res = requests.post(f"{BASE_URL}/api/games/create", json={"mode": "1vs1"}, headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
+        game_id = res.json()["game_id"]
+        ok(f"Sala creada: {game_id}")
+
+        step(2, "Conectando primera conexion WS...")
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={token}") as ws1:
+            await safe_recv(ws1) 
+            ok("Primera conexion establecida")
+
+            step(3, "Conectando segunda conexion WS con el mismo token (doble pestaña)...")
+            try:
+                async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={token}") as ws2:
+                    await ws2.recv()
+                    assert False, "La conexion WS2 debio ser rechazada inmediatamente"
+            except websockets.exceptions.ConnectionClosed as e:
+                debug(f"WS2 cerrado: code={e.code} msg={e.reason}")
+                assert e.code in [1008, 1006], f"Codigo inesperado de cierre: {e.code}"
+                ok("Segunda conexion rechazada/cerrada correctamente")
+
+        print("\n  ✔ BLOQUE 8 PASADO: Doble conexion bloqueada OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 8 FALLIDO: {e}")
+        return False
+    finally:
+        if token: delete_user(token, u1)
+
+# ─────────────────────────────────────────────
+#  BLOQUE 9: ANTI-SPAM
+# ─────────────────────────────────────────────
+
+async def run_rate_limiting_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 9: ANTI-SPAM")
+    print("="*60)
+    u1 = f"sec_spam1_{uuid.uuid4().hex[:4]}"
+    u2 = f"sec_spam2_{uuid.uuid4().hex[:4]}"
+    t1, t2 = None, None
+    try:
+        step(1, "Creando sala y uniendo ambos jugadores...")
+        t1 = create_and_login(u1)
+        t2 = create_and_login(u2)
+        
+        r = requests.post(f"{BASE_URL}/api/games/create", json={"mode": "1vs1"}, headers={"Authorization": f"Bearer {t1}"})
+        game_id = r.json()["game_id"]
+        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t2}"})
+        ok(f"Sala {game_id} lista")
+
+        step(2, "Conectando ambos jugadores por WS...")
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+            
+            for _ in range(2):
+                await safe_recv(ws1)
+                await safe_recv(ws2)
+            ok("WebSockets conectados")
+
+            received_msgs = []
+            async def collector(ws):
+                try:
+                    while True:
+                        msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                        data = json.loads(msg)
+                        if data.get("type") == "chat_message":
+                            received_msgs.append(data)
+                except Exception:
+                    pass
+
+            col_task = asyncio.create_task(collector(ws2))
+
+            step(3, "Enviando dos mensajes de chat RAPIDOS (< 0.5s)...")
+            await ws1.send(json.dumps({"action": "chat", "message": "Spam1"}))
+            await asyncio.sleep(0.1)
+            await ws1.send(json.dumps({"action": "chat", "message": "Spam2"}))
+            await asyncio.sleep(2.0)
+            
+            assert len(received_msgs) <= 1, f"El Rate Limiting falló: Esperado <= 1 mensaje, recibidos {len(received_msgs)}"
+            ok(f"Rate limiting correcto: Solo {len(received_msgs)} mensaje(s) llegaron")
+
+            col_task.cancel()
+            received_msgs.clear()
+            col_task = asyncio.create_task(collector(ws2))
+
+            step(4, "Enviando mensajes LENTOS (> 0.5s)...")
+            await ws1.send(json.dumps({"action": "chat", "message": "Lento1"}))
+            await asyncio.sleep(0.6)
+            await ws1.send(json.dumps({"action": "chat", "message": "Lento2"}))
+            await asyncio.sleep(2.0)
+
+            assert len(received_msgs) == 2, f"Esperados 2 mensajes lentos, recibidos {len(received_msgs)}"
+            ok("Mensajes lentos procesados correctamente (2/2)")
+            col_task.cancel()
+
+        print("\n  ✔ BLOQUE 9 PASADO: Rate limiting anti-spam OK")
+        return True
+    except Exception as e:
+        print(f"\n  ✘ BLOQUE 9 FALLIDO: {e}")
+        return False
+    finally:
+        if t1: delete_user(t1, u1)
+        if t2: delete_user(t2, u2)
+
+
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -743,6 +860,8 @@ async def async_main():
     results["Motor de Juego y Reglas (4P en memoria)"]    = await run_4p_core_rules_test()
     results["Fin de Partida, ELO y Estadisticas (4P)"]    = await run_4p_endgame_elo_test()
     results["Motor IA (16x16) y Empates Justos"]          = await run_fair_ties_and_ai_test()
+    results["Bloqueo de doble conexion WS"]               = await run_double_connection_test()
+    results["Anti-spam WS"]                               = await run_rate_limiting_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")
