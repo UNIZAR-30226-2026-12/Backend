@@ -9,11 +9,20 @@ class ConnectionManager:
         self.active_users: Dict[str, WebSocket] = {}
 
     async def connect(self, websocket: WebSocket, game_id: str, username: str) -> bool:
-        if username in self.active_users:
-            await websocket.accept()
-            await websocket.close(code=1008, reason="Ya tienes una sesion activa en otro lugar")
-            print(f"DEBUG: Doble conexion bloqueada para '{username}' en sala {game_id}")
-            return False
+        from starlette.websockets import WebSocketState
+        prev_ws = self.active_users.get(username)
+        if prev_ws is not None:
+            # Solo bloquear si la sesion anterior sigue activa (no cerrada por el cliente)
+            prev_still_open = prev_ws.client_state == WebSocketState.CONNECTED
+            if prev_still_open:
+                await websocket.accept()
+                await websocket.close(code=1008, reason="Ya tienes una sesion activa en otro lugar")
+                print(f"DEBUG: Doble conexion bloqueada para '{username}' en sala {game_id}")
+                return False
+            else:
+                # Sesion anterior ya cerrada: limpiar rastro obsoleto antes de reconectar
+                self.disconnect(prev_ws, game_id, username)
+                print(f"DEBUG: Sesion obsoleta de '{username}' limpiada automaticamente antes de reconectar")
 
         await websocket.accept()
         if game_id not in self.active_connections:

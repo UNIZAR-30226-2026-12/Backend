@@ -1,6 +1,8 @@
+import html
 import asyncio
 import json
-import html
+import time
+import os
 from typing import List, Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -107,22 +109,23 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         manager.disconnect_timers[timer_key].cancel()
         del manager.disconnect_timers[timer_key]
 
-    was_paused = username in game.get("paused_usernames", [])
-    if was_paused:
-        game_manager.resume_player(game_id, username)
-        await manager.broadcast_game_state(game_id, game_manager.get_game_state(game_id))
+    try:
+        was_paused = username in game.get("paused_usernames", [])
+        if was_paused:
+            game_manager.resume_player(game_id, username)
+            await manager.broadcast_game_state(game_id, game_manager.get_game_state(game_id))
 
-    await websocket.send_json({"type": "player_assignment", "payload": {"color": assigned_piece}})
-    game.setdefault("players_ready", {})[username] = False
+        await websocket.send_json({"type": "player_assignment", "payload": {"color": assigned_piece}})
+        game.setdefault("players_ready", {})[username] = False
 
-    if game.get("mode") == "vs_ai":
-        game_manager.set_game_playing(game_id)
-        await websocket.send_json({
-            "type": "game_state_update",
-            "payload": game_manager.get_game_state(game_id)
-        })
-    else:
-        await broadcast_room_sync(game_id)
+        if game.get("mode") == "vs_ai":
+            game_manager.set_game_playing(game_id)
+            await websocket.send_json({
+                "type": "game_state_update",
+                "payload": game_manager.get_game_state(game_id)
+            })
+        else:
+            await broadcast_room_sync(game_id)
         if game.get("status") == "waiting":
             await websocket.send_json({"type": "waiting_for_player", "payload": {"message": "Esperando a que todos esten listos..."}})
         else:
@@ -131,7 +134,6 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 "payload": game_manager.get_game_state(game_id)
             })
 
-    try:
         last_message_time: float = 0.0
         
         while True:
@@ -223,7 +225,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                         if not current_state or current_state.get("game_over"): return
                         
                         c_player = current_state.get("current_player")
-                        g_mode = game.get("mode", "1v1")
+                        g_mode = current_state.get("mode", "1v1")
                         
                         is_1v1_ai = (g_mode == "vs_ai" and c_player == "white")
                         u_name = current_state.get("username_by_piece", {}).get(c_player)
@@ -259,7 +261,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 else: await manager.send_error(websocket, msg)
                 continue
 
-    except (WebSocketDisconnect, RuntimeError):
+    except Exception as e:
         manager.disconnect(websocket, game_id, username)
         if not (game := game_manager.get_game_state(game_id)): return
 
@@ -268,7 +270,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
             is_host = lobby and int(lobby["creator_id"]) == int(user["id"])
             is_public = lobby and lobby["is_public"]
             
-            if is_host and is_public:
+            rival_asignado = bool(game.get("white_player") or game.get("black_player") and game.get("black_player") != username)
+            
+            if is_host and not rival_asignado:
                 await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
                 game_manager.remove_game(game_id)
                 await manager.broadcast(game_id, {"type": "error", "payload": {"message": "El host ha abandonado la sala. Partida cancelada."}})
@@ -278,7 +282,12 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     if p != username:
                         await notifier.send_invite_response(target_username=p, game_id=game_id, action="room_closed", guest=username)
             else:
-                if username in game.get("participants", []):
+                tiene_pieza = (
+                    game.get("black_player") == username or
+                    game.get("white_player") == username or
+                    username in game.get("piece_by_username", {})
+                )
+                if username in game.get("participants", []) and not tiene_pieza:
                     game["participants"].remove(username)
                     game.get("players_ready", {}).pop(username, None)
                     await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", 

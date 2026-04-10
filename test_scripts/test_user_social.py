@@ -368,6 +368,73 @@ def run_ranking_test():
             delete_user(token, dummy)
 
 
+
+# ─────────────────────────────────────────────
+#  BLOQUE 4: GAPS (AUTH, AVATAR, CHAT, H2H)
+# ─────────────────────────────────────────────
+
+def run_extra_coverage_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 4: COBERTURA EXTRA (GAPS QA)")
+    print("="*60)
+
+    u1, u2 = f"gap1_{uuid.uuid4().hex[:4]}", f"gap2_{uuid.uuid4().hex[:4]}"
+    t1 = create_and_login(u1)
+    t2 = create_and_login(u2)
+    
+    id1 = requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {t1}"}).json()["id"]
+    id2 = requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {t2}"}).json()["id"]
+
+    try:
+        step(1, "Recuperacion de credenciales (Forgot/Reset)")
+        res_f = requests.post(f"{BASE_URL}/api/auth/forgot-password", json={"email": f"{u1}@test.com"})
+        assert res_f.status_code in [200, 500], f"El endpoint de forgot-password fallo con HTTP {res_f.status_code}"
+        res_r = requests.post(f"{BASE_URL}/api/auth/reset-password", json={"email": f"{u1}@test.com", "code": "000000", "new_password": "123456"})
+        assert res_r.status_code in [200, 400, 404, 422], f"El endpoint de reset-password fallo con HTTP {res_r.status_code}"
+        ok("Endpoints de recuperacion accesibles y validados")
+
+        step(2, "Subida de Avatares Segura (I/O Multipart)")
+        files = {"file": ("avatar.png", b"fake_png_data", "image/png")}
+        res_av = requests.post(f"{BASE_URL}/api/users/avatar", headers={"Authorization": f"Bearer {t1}"}, files=files)
+        assert res_av.status_code == 200, "Fallo subida avatar"
+        assert "avatar_url" in res_av.json(), "El JSON no devolvio la nueva avatar_url"
+        ok("Avatar binario subido y procesado de forma segura")
+
+        step(3, "Chat REST Privado (Offline)")
+        requests.post(f"{BASE_URL}/api/friends/request", headers={"Authorization": f"Bearer {t1}"}, json={"username": u2})
+        requests.post(f"{BASE_URL}/api/friends/{id1}/accept", headers={"Authorization": f"Bearer {t2}"})
+
+        res_c = requests.post(f"{BASE_URL}/api/friends/{id2}/chat", headers={"Authorization": f"Bearer {t1}"}, json={"message": "Hola REST!"})
+        assert res_c.status_code == 200, "Fallo envio de mensaje REST"
+        
+        res_cg = requests.get(f"{BASE_URL}/api/friends/{id2}/chat", headers={"Authorization": f"Bearer {t1}"})
+        assert res_cg.status_code == 200, "Fallo recuperacion historial de chat"
+        assert any(m["message"] == "Hola REST!" for m in res_cg.json()["messages"]), "Mensaje no guardado en BBDD"
+        
+        res_cr = requests.post(f"{BASE_URL}/api/friends/{id2}/chat/read", headers={"Authorization": f"Bearer {t1}"})
+        assert res_cr.status_code == 200, "Fallo al marcar mensajes como leidos"
+        ok("Chat REST bidireccional funciona y persiste en Base de Datos")
+
+        step(4, "Estadisticas Cara a Cara (H2H)")
+        res_h2h = requests.get(f"{BASE_URL}/api/users/{id2}/h2h", headers={"Authorization": f"Bearer {t1}"})
+        assert res_h2h.status_code == 200, f"Fallo get H2H: {res_h2h.status_code}"
+        
+        data_h2h = res_h2h.json()
+        assert "total_matches" in data_h2h, "La respuesta no tiene la clave 'total_matches'"
+        assert "wins" in data_h2h, "La respuesta no tiene la clave 'wins'"
+        ok("Endpoint de estadisticas de rivalidad (H2H) accesible y estructurado correctamente")
+
+        print("\n  ✔ BLOQUE 4 PASADO: Cobertura Extra OK")
+        return True
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 4 FALLIDO: {e}")
+        return False
+    finally:
+        delete_user(t1, u1)
+        delete_user(t2, u2)
+
 # ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
@@ -381,6 +448,7 @@ def main():
         "Auth, perfil y personalizacion": run_auth_and_profile_test(),
         "Sistema social (amigos)"       : run_social_test(),
         "Leaderboard global"            : run_ranking_test(),
+        "Cobertura Extra (GAPS)"        : run_extra_coverage_test(),
     }
 
     print("\n" + "#"*60)

@@ -95,7 +95,7 @@ async def safe_recv(ws, label="WS", timeout=5.0):
             
             # Magia: Si el server nos pone en espera, enviamos "Ready" automaticamente
             if tipo == "waiting_for_player":
-                await ws.send(json.dumps({"action": "set_ready", "ready": True}))
+                await asyncio.sleep(0.6); await ws.send(json.dumps({"action": "set_ready", "ready": True}))
                 continue
                 
             # Ignoramos la sincronizacion del lobby para que los asserts antiguos no fallen
@@ -268,7 +268,17 @@ async def run_friendly_invite_test():
             debug(f"Respuesta accept: {res_acc.json()}")
             ok("Duelo aceptado correctamente")
 
-            step(6, f"Verificando que '{u1}' recibe confirmacion de aceptacion...")
+            step(6, "Probar flujo de rechazo de invitacion (/reject)...")
+            id2 = requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {t2}"}).json()["id"]
+            res_inv2 = requests.post(f"{BASE_URL}/api/games/invite", headers={"Authorization": f"Bearer {t1}"}, json={"friend_ids": [id2], "mode": "1v1"})
+            game_id_reject = res_inv2.json()["game_id"]
+            res_rej = requests.post(f"{BASE_URL}/api/games/{game_id_reject}/reject", headers={"Authorization": f"Bearer {t2}"})
+            assert res_rej.status_code == 200, "Fallo al rechazar la invitacion"
+            estado_sala = requests.get(f"{BASE_URL}/api/games/{game_id_reject}/state", headers={"Authorization": f"Bearer {t1}"})
+            assert estado_sala.status_code == 404, "La sala 1v1 rechazada no fue destruida de la base de datos"
+            ok("El flujo de rechazo limpia correctamente las salas no deseadas")
+
+            step(7, f"Verificando que '{u1}' recibe confirmacion de aceptacion...")
             confirma = await safe_recv(notif1, label=u1, timeout=5.0)
             assert confirma is not None, \
                 f"'{u1}' no recibio confirmacion de aceptacion"
@@ -277,7 +287,7 @@ async def run_friendly_invite_test():
             debug(f"Payload de confirmacion: {confirma.get('payload')}")
             ok(f"'{u1}' recibio 'invite_response' correctamente")
 
-            step(7, "Ambos jugadores se conectan a la sala de juego y verifican el inicio...")
+            step(8, "Ambos jugadores se conectan a la sala de juego y verifican el inicio...")
             async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as play1:
                 asig1 = await safe_recv(play1, label=f"play-{u1}")
                 assert asig1 and asig1.get("type") == "player_assignment", \
@@ -380,7 +390,7 @@ async def run_chat_test():
 
             step(4, f"'{u1}' envia un mensaje de chat...")
             msg1 = "Hola rival, que comience el juego!"
-            await ws1.send(json.dumps({"action": "chat", "message": msg1}))
+            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "chat", "message": msg1}))
             debug(f"Mensaje enviado por '{u1}': '{msg1}'")
 
             recibido_u2 = await wait_for_chat_msg(ws2, label=u2, expected_sender=u1)
@@ -392,7 +402,7 @@ async def run_chat_test():
 
             step(5, f"'{u2}' responde por el chat...")
             msg2 = "Gracias! Suerte a ti tambien."
-            await ws2.send(json.dumps({"action": "chat", "message": msg2}))
+            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "chat", "message": msg2}))
             debug(f"Mensaje enviado por '{u2}': '{msg2}'")
 
             recibido_u1 = await wait_for_chat_msg(ws1, label=u1, expected_sender=u2)
@@ -403,7 +413,7 @@ async def run_chat_test():
             ok(f"'{u1}' recibio correctamente la respuesta de '{u2}'")
 
             step(6, "Probando mensaje de chat vacio (no debe propagarse)...")
-            await ws1.send(json.dumps({"action": "chat", "message": ""}))
+            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "chat", "message": ""}))
             eco_vacio = await safe_recv(ws2, label=f"empty-check-{u2}", timeout=2.0)
             if eco_vacio and eco_vacio.get("type") == "chat_message":
                 debug("El servidor propago un mensaje vacio (comportamiento permisivo)")
@@ -525,21 +535,21 @@ async def run_4p_sync_chat_test():
             ok("Colores unicos asignados (black, white, red, blue)")
 
             step(2, "El Ready Parcial...")
-            await ws0.send(json.dumps({"action": "set_ready", "ready": True}))
-            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
-            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws0.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
 
             msg_test = await wait_for_game_update(ws0)
             if msg_test: raise AssertionError("La partida empezo con solo 3 listos!")
             ok("La partida sigue 'waiting' con 3 jugadores listos")
 
-            await ws3.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws3.send(json.dumps({"action": "set_ready", "ready": True}))
             estados = await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
             assert all(e["payload"]["status"] == "playing" for e in estados if e), "El estado no cambio a playing"
             ok("La partida comenzo al estar los 4 ready")
 
             step(3, "Chat Multijugador...")
-            await ws0.send(json.dumps({"action": "chat", "message": "Hola a todos"}))
+            await asyncio.sleep(0.6); await ws0.send(json.dumps({"action": "chat", "message": "Hola a todos"}))
             chat_msgs = await asyncio.gather(safe_recv(ws1), safe_recv(ws2), safe_recv(ws3))
             assert all(c and c.get("type") == "chat_message" for c in chat_msgs), "Fallo la propagacion del chat"
             ok("Mensaje de chat recibido por los 3 contrincantes concurrentemente")

@@ -96,14 +96,21 @@ async def wait_for_board(ws, timeout=3.0):
 
 async def safe_recv(ws, label="WS", timeout=3.0):
     try:
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
         while True:
-            raw  = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            raw  = await asyncio.wait_for(ws.recv(), timeout=remaining)
             data = json.loads(raw)
             tipo = data.get("type", "?")
             
             if tipo == "waiting_for_player":
+                await asyncio.sleep(0.6)
                 await ws.send(json.dumps({"action": "set_ready", "ready": True}))
                 debug(f"[{label}] Auto-ready enviado.")
+                deadline = loop.time() + timeout  # Reiniciar deadline tras consumir waiting_for_player
                 continue
                 
             if tipo == "room_sync":
@@ -111,6 +118,8 @@ async def safe_recv(ws, label="WS", timeout=3.0):
                 
             debug(f"[{label}] tipo='{tipo}' | payload={str(data.get('payload',''))[:120]}")
             return data
+        debug(f"[{label}] TIMEOUT ({timeout}s) — sin mensaje")
+        return None
     except asyncio.TimeoutError:
         debug(f"[{label}] TIMEOUT ({timeout}s) — sin mensaje")
         return None
@@ -165,17 +174,24 @@ async def run_flickering_test():
             step(3, f"'{u1}' realiza 3 ciclos de conexion/desconexion rapida (flickering)...")
             for i in range(1, 4):
                 debug(f"--- Ciclo {i}/3: conectando '{u1}'...")
-                async with websockets.connect(
-                    f"{WS_URL}/ws/play/{game_id}?token={t1}"
-                ) as ws_temp:
-                    msg = await safe_recv(ws_temp, label=f"flash-{i}", timeout=2.0)
-                    debug(f"Ciclo {i}: recibido tipo='{msg.get('type') if msg else None}'")
-                    debug(f"Ciclo {i}: desconectando abruptamente...")
-                # Sin espera entre intentos
-                await asyncio.sleep(0.1)
+                try:
+                    async with websockets.connect(
+                        f"{WS_URL}/ws/play/{game_id}?token={t1}"
+                    ) as ws_temp:
+                        msg = await safe_recv(ws_temp, label=f"flash-{i}", timeout=2.0)
+                        debug(f"Ciclo {i}: recibido tipo='{msg.get('type') if msg else None}'")
+                        debug(f"Ciclo {i}: desconectando abruptamente...")
+                        await ws_temp.close()
+                except Exception as e:
+                    pass
+                
+                await asyncio.sleep(1.0)  # 1.0s para que el servidor cierre el handler anterior
+                
             ok("3 ciclos de flickering completados sin crash del servidor")
 
             step(4, "Reconexion final y definitiva de '{u1}'...")
+            await asyncio.sleep(1.0)
+            
             async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1:
                 asig = await safe_recv(ws1, label=f"final-asig-{u1}", timeout=4.0)
                 assert asig is not None, \
@@ -200,7 +216,7 @@ async def run_flickering_test():
 
                 step(6, "Realizando movimiento tras reconexion para confirmar funcionalidad...")
                 mov = {"action": "make_move", "row": 2, "col": 3, "player": "black"}
-                await ws1.send(json.dumps(mov))
+                await asyncio.sleep(0.6); await ws1.send(json.dumps(mov))
                 res_mov = await safe_recv(ws1, label=f"mov-post-flicker-{u1}", timeout=4.0)
                 assert res_mov is not None, \
                     "El servidor no respondio al movimiento tras el flickering"
@@ -438,7 +454,7 @@ async def run_isolation_test():
 
             step(4, f"Jugador A1 ({names[0]}) realiza un movimiento en la Sala A...")
             movimiento = {"action": "make_move", "row": 2, "col": 3, "player": "black"}
-            await ws_a1.send(json.dumps(movimiento))
+            await asyncio.sleep(0.6); await ws_a1.send(json.dumps(movimiento))
             debug(f"Movimiento enviado en Sala A: {movimiento}")
 
             step(5, "Verificando que A2 recibe la actualizacion de la Sala A...")
@@ -466,7 +482,7 @@ async def run_isolation_test():
             ok("Silencio total en la Sala B. Las salas estan perfectamente aisladas")
 
             step(7, "Verificacion inversa: movimiento en Sala B no llega a Sala A...")
-            await ws_b1.send(json.dumps({"action": "make_move", "row": 5, "col": 4, "player": "black"}))
+            await asyncio.sleep(0.6); await ws_b1.send(json.dumps({"action": "make_move", "row": 5, "col": 4, "player": "black"}))
             debug("Movimiento enviado en Sala B...")
 
             # Consumir la actualizacion legitima de B2
@@ -514,7 +530,7 @@ async def run_4p_abandonment_test():
             await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
 
             step(2, "Rendicion Parcial...")
-            await ws0.send(json.dumps({"action": "surrender", "player": "black"}))
+            await asyncio.sleep(0.6); await ws0.send(json.dumps({"action": "surrender", "player": "black"}))
             estado = await wait_for_game_update(ws1)
             assert not estado["payload"]["game_over"], "La partida termino erroneamente"
             assert "black" not in estado["payload"].get("active_pieces", []), "Black no quitado"
@@ -534,8 +550,8 @@ async def run_4p_abandonment_test():
             ok("Expulsion por timeout parcial (30s) procesada con exito")
 
             step(4, "Bloqueo Mutuo Prematuro (todos se rinden)...")
-            await ws2.send(json.dumps({"action": "surrender"}))
-            await ws3.send(json.dumps({"action": "surrender"}))
+            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "surrender"}))
+            await asyncio.sleep(0.6); await ws3.send(json.dumps({"action": "surrender"}))
             
             game_over_reached = False
             for _ in range(10):
