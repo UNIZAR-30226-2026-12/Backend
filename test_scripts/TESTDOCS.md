@@ -6,6 +6,7 @@
 * **Bloque 1: Autenticación, perfil y personalización:** Valida el ciclo de identidad completo (registro, `login`, validación de credenciales), consulta y edición de perfil, personalización de elementos visuales (tablero/fichas), acceso a estadísticas y protección de rutas sin autenticar.
 * **Bloque 2: Sistema de amigos:** Comprueba el flujo de relaciones interpersonales, incluyendo envío y aceptación de solicitudes, actualización de las listas de amigos, rechazo de solicitudes duplicadas y eliminación de contactos.
 * **Bloque 3: Leaderboard global:** Verifica la existencia, formato y estructura de datos del ranking global, asegurando su correcto orden descendente basado en el `ELO` y validando el sistema de paginación (`limit`/`skip`).
+* **Bloque 4: Cobertura Extra (GAPS QA):** Evalúa funcionalidades críticas de soporte como la recuperación de credenciales (`forgot-password`), la subida segura de avatares binarios, la mensajería persistente vía `REST` para usuarios offline y las estadísticas competitivas cara a cara (`H2H`).
 
 ## 🤝 `test_matchmaking.py`
 *Creación de partidas y comunicación en sala.*
@@ -29,6 +30,7 @@
 * **Bloque 7: IA no bloqueante y Empates Matemáticos:** Verifica la heurística de la `IA` en tableros de `16x16` asegurando su ejecución en hilos secundarios (`asyncio.to_thread`) para no bloquear el `Event Loop`, y valida la resolución justa de empates múltiples.
 * **Bloque 8: Bloqueo de doble conexión WS:** Verifica que el servidor impida que un mismo usuario mantenga dos conexiones de `WebSocket` activas simultáneamente para la misma partida, desconectando la sesión más antigua para prevenir inconsistencias.
 * **Bloque 9: Anti-spam WS (Rate Limiting):** Comprueba que el sistema de `Rate Limiting` descarte mensajes excesivamente rápidos (frecuencia mayor a 0.5s), protegiendo la estabilidad del servidor y la integridad de la partida.
+* **Bloque 10: Mecánica de Pausa en Partida:** Evalúa la capacidad de detener temporalmente el juego mediante `WebSocket`, verificando el bloqueo de movimientos durante la pausa y la reanudación automática tras la reconexión de los jugadores.
 
 ## ⚡ `test_resilience.py`
 *Estabilidad de red, reconexiones y aislamiento.*

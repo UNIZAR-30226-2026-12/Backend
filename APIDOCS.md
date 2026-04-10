@@ -217,6 +217,7 @@ password=MiClaveSecreta
 
 #### 🟠 PUT `/api/users/me/elo`
 **Actualizar el ELO y Peak ELO (Internal/Game usage)**
+El servidor actualiza automáticamente el `peak_elo` utilizando la función `GREATEST`, asegurando que el máximo histórico nunca disminuya.
 
 **Body requerido:**
 ```json
@@ -402,6 +403,9 @@ password=MiClaveSecreta
 
 #### 🔵 POST `/api/friends/request`
 **Añadir a alguien por nombre exacto.**
+
+> [!CAUTION]
+> **Límite de Seguridad:** Si un usuario rechaza tu solicitud **3 veces**, el sistema bloqueará futuros intentos de envío hacia ese usuario para prevenir el acoso (HTTP 403).
 
 **Body requerido:**
 ```json
@@ -727,6 +731,7 @@ Como los `WebSockets` estándar no envían cabeceras de autorización custom fá
 > **Restricciones de Seguridad Críticas:**
 > - **Rate Limiting:** Se permite un máximo de 1 mensaje (cualquier acción) cada **0.5 segundos** por cliente para prevenir ataques de denegación de servicio o spam.
 > - **Tipado Estricto:** Las coordenadas `row` y `col` deben ser estrictamente números enteros (`int`). El envío de tipos incorrectos provocará el cierre de la conexión por el servidor.
+> - **Dimensiones del Tablero:** El servidor valida que las coordenadas estén dentro de **8x8** (1v1) o **16x16** (4P).
 
 > [!TIP]
 > **Optimización de Rendimiento (AI):**
@@ -738,6 +743,7 @@ Como los `WebSockets` estándar no envían cabeceras de autorización custom fá
 - `{"type": "waiting_for_player", "payload": {"message": "..."}}`: Mensaje informativo de espera de jugadores.
 - `{"type": "game_state_update", "payload": {...}}`: Estado completo del tablero y la partida.
   - Incluye `paused_usernames`: Lista de usuarios que han pausado la partida.
+  - Al detectar `game_over: true`, el servidor programa la **limpieza automática** de la sala en memoria tras 5 segundos.
 - `{"type": "chat_message", "payload": {"sender": "User", "message": "..."}}`: Nuevo mensaje de chat recibido.
 - `{"type": "error", "payload": {"message": "..."}}`: Notificación de error (movimiento inválido, etc).
 - `{"type": "invite_response", "payload": {"action": "room_closed|left|kicked", ...}}`: Notificación de cierre de sala o expulsión.
