@@ -6,31 +6,6 @@ from game.manager import game_manager
 
 router = APIRouter()
 
-async def ensure_friend_chat_table():
-    await database.execute(
-        """
-        CREATE TABLE IF NOT EXISTS friend_messages (
-            id SERIAL PRIMARY KEY,
-            sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            message TEXT NOT NULL,
-            is_read BOOLEAN NOT NULL DEFAULT false,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    await database.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_friend_messages_pair_created_at
-        ON friend_messages (sender_id, receiver_id, created_at)
-        """
-    )
-    await database.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_friend_messages_receiver_unread
-        ON friend_messages (receiver_id, is_read)
-        """
-    )
 
 
 async def assert_accepted_friendship(current_user_id: int, friend_id: int):
@@ -50,65 +25,6 @@ async def assert_accepted_friendship(current_user_id: int, friend_id: int):
 
 @router.get("")
 async def list_friends(current_user: dict = Depends(get_current_user)):
-    await ensure_friend_chat_table()
-    await database.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lobby_invites (
-            id SERIAL PRIMARY KEY,
-            lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
-            invited_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            invite_order INTEGER NOT NULL DEFAULT 0,
-            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(lobby_id, invited_id)
-        )
-        """
-    )
-    await database.execute(
-        """
-        ALTER TABLE lobby_invites
-        ADD COLUMN IF NOT EXISTS invited_id INTEGER REFERENCES users(id) ON DELETE CASCADE
-        """
-    )
-    await database.execute(
-        """
-        ALTER TABLE lobby_invites
-        ADD COLUMN IF NOT EXISTS invited_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE
-        """
-    )
-    await database.execute(
-        """
-        UPDATE lobby_invites
-        SET invited_user_id = invited_id
-        WHERE invited_user_id IS NULL AND invited_id IS NOT NULL
-        """
-    )
-    await database.execute(
-        """
-        UPDATE lobby_invites
-        SET invited_id = invited_user_id
-        WHERE invited_id IS NULL AND invited_user_id IS NOT NULL
-        """
-    )
-    await database.execute(
-        """
-        ALTER TABLE lobby_invites
-        ADD COLUMN IF NOT EXISTS invite_order INTEGER NOT NULL DEFAULT 0
-        """
-    )
-    await database.execute(
-        """
-        ALTER TABLE lobby_invites
-        ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending'
-        """
-    )
-    await database.execute(
-        """
-        ALTER TABLE lobby_invites
-        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        """
-    )
-
     # 1. Amigos aceptados
     query_friends = """
         SELECT
@@ -268,7 +184,6 @@ async def delete_friend(user_id: int, current_user: dict = Depends(get_current_u
 
 @router.get("/{user_id}/chat")
 async def get_friend_chat(user_id: int, current_user: dict = Depends(get_current_user)):
-    await ensure_friend_chat_table()
     if user_id == current_user["id"]:
         raise HTTPException(status_code=400, detail="No puedes abrir un chat contigo mismo")
 
@@ -304,7 +219,6 @@ async def send_friend_chat_message(
     payload: ChatMessageCreate,
     current_user: dict = Depends(get_current_user),
 ):
-    await ensure_friend_chat_table()
     if user_id == current_user["id"]:
         raise HTTPException(status_code=400, detail="No puedes enviarte mensajes a ti mismo")
 
@@ -330,7 +244,6 @@ async def send_friend_chat_message(
 
 @router.post("/{user_id}/chat/read")
 async def mark_friend_chat_as_read(user_id: int, current_user: dict = Depends(get_current_user)):
-    await ensure_friend_chat_table()
     if user_id == current_user["id"]:
         raise HTTPException(status_code=400, detail="Operacion invalida")
 

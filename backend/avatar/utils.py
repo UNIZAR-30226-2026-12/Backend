@@ -19,3 +19,17 @@ def save_user_avatar_file(user_id: int, file: UploadFile) -> Tuple[str, str]:
     file_path = os.path.join(AVATARS_UPLOADS_DIR, file_name)
     public_path = f"/uploads/avatars/{file_name}"
     return file_path, public_path
+
+
+def delete_avatar_file(avatar_url: str | None) -> None:
+    """Borra el fichero de avatar del disco si es un upload local."""
+    if not avatar_url or "/uploads/avatars/" not in avatar_url:
+        return
+    file_name = avatar_url.split("/uploads/avatars/")[-1]
+    if not file_name:
+        return
+    file_path = os.path.join(AVATARS_UPLOADS_DIR, file_name)
+    try:
+        os.remove(file_path)
+    except FileNotFoundError:
+        pass  # Ya no existía, no es un error

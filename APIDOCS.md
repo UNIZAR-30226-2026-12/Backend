@@ -201,7 +201,9 @@ password=MiClaveSecreta
 ---
 
 #### 🔵 POST `/api/users/avatar`
-**Subir un nuevo avatar real como archivo binario**
+**Subir un nuevo avatar como archivo binario.** La imagen se almacena directamente en la base de datos codificada en `base64`, sin escritura en disco. Al eliminar la cuenta, el avatar desaparece automáticamente.
+
+**Formatos aceptados:** `image/png`, `image/jpeg`, `image/webp`, `image/gif` — Tamaño máximo: **2 MB**
 
 **Body requerido (Multipart/form-data):**
 - Archivo binario adjunto bajo la key `file`.
@@ -209,11 +211,13 @@ password=MiClaveSecreta
 **Respuesta (200):**
 ```json
 {
-  "avatar_url": "/uploads/avatars/user123_abc.png"
+  "avatar_url": "data:image/png;base64,iVBORw0KGgo..."
 }
 ```
 
----
+> [!NOTE]
+> El valor devuelto en `avatar_url` es una **data URL** estándar, utilizable directamente como `src` en etiquetas `<img>` sin ninguna petición adicional al servidor.
+
 
 #### 🟠 PUT `/api/users/me/elo`
 **Actualizar el ELO y Peak ELO (Internal/Game usage)**

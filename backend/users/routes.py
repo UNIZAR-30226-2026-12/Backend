@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from collections import Counter
 from persistence.database import database
@@ -243,12 +243,18 @@ async def read_h2h(user_id: int, current_user: dict = Depends(get_current_user))
 
     friend_name = friend["username"]
 
+    # strpos() busca el nombre del rival dentro del campo opponent_name.
+    # Paddeamos con ', ' para evitar coincidencias parciales (ej: "Al" dentro de "Alice").
     query_h2h = """
         SELECT mode, result, opponent_name
         FROM game_history
         WHERE user_id = :uid
+          AND strpos(', ' || opponent_name || ', ', ', ' || :friend_name || ', ') > 0
     """
-    rows = await database.fetch_all(query=query_h2h, values={"uid": current_user["id"]})
+    rows = await database.fetch_all(
+        query=query_h2h,
+        values={"uid": current_user["id"], "friend_name": friend_name},
+    )
 
     total_matches = 0
     wins = 0
@@ -501,7 +507,8 @@ async def delete_my_account(current_user: dict = Depends(get_current_user)):
         {"uid": user_id},
     )
 
-    # 5. Finalmente, borramos al usuario (los lobbies se borran en cascada automÃ¡ticamente)
+    # 5. Borramos al usuario (los lobbies se borran en cascada automáticamente)
+    # El avatar se borra automáticamente al eliminar la fila (está guardado en avatar_url como base64)
     await database.execute(
         "DELETE FROM users WHERE id = :uid",
         {"uid": user_id},

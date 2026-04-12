@@ -12,6 +12,7 @@ from avatar.routes import router as avatar_router
 from friends.routes import router as friends_router
 from lobby.routes import router as lobby_router
 from persistence.database import database
+from persistence.migrations import run_migrations
 from ranking.routes import router as ranking_router
 from users.routes import router as users_router
 from ws.routes import router as ws_router
@@ -61,6 +62,7 @@ app.include_router(ws_router, prefix="/ws", tags=["WebSockets"])
 @app.on_event("startup")
 async def startup():
     await database.connect()
+    await run_migrations()
 
 @app.on_event("shutdown")
 async def shutdown():
