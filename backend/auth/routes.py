@@ -62,7 +62,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 async def forgot_password(request: ForgotPasswordRequest):
     email = request.email.strip().lower()
 
-    query = "SELECT id FROM users WHERE email = :email"
+    query = "SELECT id FROM users WHERE LOWER(email) = :email"
     user = await database.fetch_one(query=query, values={"email": email})
 
     if not user:
