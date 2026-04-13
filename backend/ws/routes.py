@@ -14,6 +14,9 @@ from ws.manager import manager
 from ws.notifications import notifier
 
 router = APIRouter()
+WAITING_ROOM_DISCONNECT_GRACE_SECONDS = float(
+    os.getenv("WAITING_ROOM_DISCONNECT_GRACE_SECONDS", "3")
+)
 
 def mode_to_api(mode: str) -> str:
     if mode == "1v1": return "1vs1"
@@ -266,38 +269,62 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         if not (game := game_manager.get_game_state(game_id)): return
 
         if game.get("status") == "waiting":
-            lobby = await database.fetch_one("SELECT creator_id, is_public, id FROM lobbies WHERE id = :id", {"id": int(game_id)})
-            is_host = lobby and int(lobby["creator_id"]) == int(user["id"])
-            is_public = lobby and lobby["is_public"]
-            
-            rival_asignado = bool(game.get("white_player") or game.get("black_player") and game.get("black_player") != username)
-            
-            if is_host and not rival_asignado:
-                await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
-                game_manager.remove_game(game_id)
-                await manager.broadcast(game_id, {"type": "error", "payload": {"message": "El host ha abandonado la sala. Partida cancelada."}})
-                
-                parts = game.get("participants", [])
-                for p in parts:
-                    if p != username:
-                        await notifier.send_invite_response(target_username=p, game_id=game_id, action="room_closed", guest=username)
-            else:
-                tiene_pieza = (
-                    game.get("black_player") == username or
-                    game.get("white_player") == username or
-                    username in game.get("piece_by_username", {})
-                )
-                if username in game.get("participants", []) and not tiene_pieza:
-                    game["participants"].remove(username)
-                    game.get("players_ready", {}).pop(username, None)
-                    await database.execute("DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid", 
-                                        {"id": int(game_id), "uid": user["id"]})
-                
-                await broadcast_room_sync(game_id)
-                parts = game.get("participants", [])
-                for p in parts:
-                    if p != username:
-                        await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
+            async def waiting_disconnect_task():
+                try:
+                    # Evita cerrar la sala por desconexiones fugaces (re-render, microcortes, etc.)
+                    await asyncio.sleep(WAITING_ROOM_DISCONNECT_GRACE_SECONDS)
+                    latest_game = game_manager.get_game_state(game_id)
+                    if not latest_game or latest_game.get("status") != "waiting":
+                        return
+
+                    lobby = await database.fetch_one(
+                        "SELECT creator_id, is_public, id FROM lobbies WHERE id = :id",
+                        {"id": int(game_id)}
+                    )
+                    is_host = lobby and int(lobby["creator_id"]) == int(user["id"])
+
+                    rival_asignado = bool(
+                        latest_game.get("white_player") or
+                        latest_game.get("black_player") and latest_game.get("black_player") != username
+                    )
+
+                    if is_host and not rival_asignado:
+                        await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
+                        game_manager.remove_game(game_id)
+                        await manager.broadcast(game_id, {"type": "error", "payload": {"message": "El host ha abandonado la sala. Partida cancelada."}})
+
+                        parts = latest_game.get("participants", [])
+                        for p in parts:
+                            if p != username:
+                                await notifier.send_invite_response(target_username=p, game_id=game_id, action="room_closed", guest=username)
+                    else:
+                        tiene_pieza = (
+                            latest_game.get("black_player") == username or
+                            latest_game.get("white_player") == username or
+                            username in latest_game.get("piece_by_username", {})
+                        )
+                        if username in latest_game.get("participants", []) and not tiene_pieza:
+                            latest_game["participants"].remove(username)
+                            latest_game.get("players_ready", {}).pop(username, None)
+                            await database.execute(
+                                "DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid",
+                                {"id": int(game_id), "uid": user["id"]}
+                            )
+
+                        await broadcast_room_sync(game_id)
+                        parts = latest_game.get("participants", [])
+                        for p in parts:
+                            if p != username:
+                                await notifier.send_invite_response(target_username=p, game_id=game_id, action="left", guest=username)
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    if timer_key in manager.disconnect_timers:
+                        del manager.disconnect_timers[timer_key]
+
+            if timer_key in manager.disconnect_timers:
+                manager.disconnect_timers[timer_key].cancel()
+            manager.disconnect_timers[timer_key] = asyncio.create_task(waiting_disconnect_task())
             return
 
         if game.get("status") == "playing" and not game.get("game_over"):
