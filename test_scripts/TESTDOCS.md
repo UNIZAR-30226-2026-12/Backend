@@ -41,3 +41,4 @@
 * **Bloque 4: Aislamiento total de salas:** Garantiza la estanqueidad de las sesiones evaluando múltiples partidas concurrentes sin fuga de datos.
 * **Bloque 5: Rendición y Abandono Parcial (4P):** Gestiona la salida de jugadores individuales en modo 4P, permitiendo que la partida continúe para el resto, y procesando el bloqueo mutuo si todos abandonan.
 * **Bloque 6: Resiliencia de Red Flickering (4P):** Prueba la estabilidad ante reconexiones múltiples y simultáneas en el modo de 4 jugadores, manteniendo la persistencia de identidad y color.
+* **Bloque 7: Resiliencia en Lobby (Grace Period 3s):** Valida la protección temporal (3 segundos) frente a desconexiones en la sala de espera. Asegura que los cortes fugaces no expulsen a los invitados con pieza asignada, permite arrancar partidas tras reconexión, y destruye correctamente los lobbies inactivos si el abandono definitivo proviene de un anfitrión solitario.

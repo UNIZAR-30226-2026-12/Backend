@@ -16,7 +16,7 @@ import uuid
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
-from game.manager import GameManager
+from game.manager import GameManager, game_manager
 
 BASE_URL = "http://localhost:8081"
 WS_URL   = "ws://localhost:8081"
@@ -620,6 +620,127 @@ async def run_4p_flickering_recon_test():
         for t, u in zip(tokens, users): delete_user(t, u)
 
 # ─────────────────────────────────────────────
+#  BLOQUE 7: RESILIENCIA EN LOBBY (GRACE PERIOD)
+# ─────────────────────────────────────────────
+
+async def run_lobby_resilience_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 7: RESILIENCIA EN LOBBY (GRACE PERIOD 3s)")
+    print("="*60)
+
+    users, tokens, _ = get_random_users(4)
+    u_host, u_g1, u_g2, u_g3 = users
+    t_host, t_g1, t_g2, t_g3 = tokens
+
+    try:
+        res = requests.post(f"{BASE_URL}/api/games/create",
+                            headers={"Authorization": f"Bearer {t_host}"},
+                            json={"mode": "1v1v1v1"})
+        assert res.status_code == 200, f"Error creando sala 4P: {res.text}"
+        game_id = res.json()["game_id"]
+        for t in [t_g1, t_g2, t_g3]:
+            requests.post(f"{BASE_URL}/api/games/join/{game_id}",
+                          headers={"Authorization": f"Bearer {t}"})
+        ok(f"Sala 4P '{game_id}' lista")
+
+        ws_host = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_host}")
+        ws_g1   = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_g1}")
+        ws_g2   = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_g2}")
+        ws_g3   = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_g3}")
+        await asyncio.gather(
+            safe_recv(ws_host, label="init-host"), safe_recv(ws_g1, label="init-g1"),
+            safe_recv(ws_g2,   label="init-g2"),   safe_recv(ws_g3, label="init-g3"),
+        )
+
+        step(1, "Caso 1: Host desconecta 1.5s y reconecta -> sala sigue viva")
+        await ws_host.close()
+        await asyncio.sleep(1.5)
+        ws_host = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_host}")
+        asig = await safe_recv(ws_host, label="C1-host-recon", timeout=5.0)
+        assert asig and asig.get("type") == "player_assignment", f"[C1] {asig}"
+        res_state = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {t_host}"})
+        assert res_state.status_code == 200, f"[C1] Sala eliminada: {res_state.text}"
+        assert res_state.json().get("status") == "waiting", f"[C1] Estado: {res_state.json()}"
+        ok("Caso 1 OK: sala viva y host reasignado")
+
+        step(2, "Caso 2: Guest1 desconecta 1.5s y reconecta -> sigue en sala")
+        await ws_g1.close()
+        await asyncio.sleep(1.5)
+        ws_g1 = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_g1}")
+        asig3 = await safe_recv(ws_g1, label="C2-g1-recon", timeout=5.0)
+        assert asig3 and asig3.get("type") == "player_assignment", f"[C2] {asig3}"
+        res_st2 = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {t_host}"})
+        players_c2 = [p["username"] for p in res_st2.json().get("players", [])]
+        assert u_g1 in players_c2, f"[C2] participants={players_c2}"
+        ok("Caso 2 OK: guest1 sigue en la sala")
+
+        step(3, "Caso 3: Guest2 desconecta >3s -> NO es expulsado (retiene pieza asignada)")
+        await ws_g2.close()
+        await asyncio.sleep(4.5)
+        res_st3 = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {t_host}"})
+        assert res_st3.status_code == 200, "[C3] Sala destruida inesperadamente"
+        players_c3 = [p["username"] for p in res_st3.json().get("players", [])]
+        assert u_g2 in players_c3, f"[C3] Guest2 expulsado erroneamente (backend deberia mantenerlo): {players_c3}"
+        ok(f"Caso 3 OK: guest2 conservó su plaza, participants={players_c3}")
+
+        step(4, "Arrancando partida con los 4 jugadores...")
+        ws_g2 = await websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t_g2}")
+        await safe_recv(ws_g2, label="C4-g2-recon", timeout=5.0)
+
+        for ws in [ws_host, ws_g1, ws_g2, ws_g3]:
+            await asyncio.sleep(0.5)
+            await ws.send(json.dumps({"action": "set_ready", "ready": True}))
+        await asyncio.gather(
+            wait_for_game_update(ws_host),
+            wait_for_game_update(ws_g1),
+            wait_for_game_update(ws_g2),
+            wait_for_game_update(ws_g3),
+        )
+        res_play = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {t_host}"})
+        assert res_play.status_code == 200 and res_play.json().get("status") == "playing", f"Partida no arranco: {res_play.text}"
+        ok("Partida en 'playing'")
+
+        step(4, "Caso 4: Guest3 desconecta 4s -> NO game_over (timer es 30s)")
+        await ws_g3.close()
+        await asyncio.sleep(4.0)
+        msg = await safe_recv(ws_g1, label="C4-check", timeout=2.0)
+        if msg and msg.get("type") == "game_state_update":
+            assert not msg["payload"].get("game_over"), f"[C4] game_over=True en 4s: {msg}"
+        res_st4 = requests.get(f"{BASE_URL}/api/games/{game_id}/state", headers={"Authorization": f"Bearer {t_host}"})
+        assert res_st4.json().get("status") == "playing", "[C4] status!=playing con solo 4s"
+        ok("Caso 4 OK: partida activa, timer 30s intacto")
+
+        await ws_host.close()
+        await ws_g1.close()
+
+        step(5, "Caso 5: Host solo desconecta >3s sin volver -> sala destruida")
+        t_c2h = create_and_login(f"lb2h_{uuid.uuid4().hex[:4]}")
+        res_create = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {t_c2h}"}, json={"mode": "1vs1"})
+        gid2 = res_create.json()["game_id"]
+        
+        ws_c2h = await websockets.connect(f"{WS_URL}/ws/play/{gid2}?token={t_c2h}")
+        await safe_recv(ws_c2h, label="C5-h")
+        
+        await ws_c2h.close()
+        await asyncio.sleep(4.5)
+        
+        res_st5 = requests.get(f"{BASE_URL}/api/games/{gid2}/state", headers={"Authorization": f"Bearer {t_c2h}"})
+        assert res_st5.status_code == 404, f"[C5] Sala no destruida tras 4.5s sin host y sin rival: {res_st5.status_code} ({res_st5.text})"
+        ok("Caso 5 OK: sala destruida tras timeout del host que no tenía rival")
+
+        print("\n  \u2714 BLOQUE 7 PASADO: Resiliencia en lobby (grace period) OK")
+        return True
+
+    except Exception as e:
+        print(f"\n  \u2718 BLOQUE 7 FALLIDO: {e}")
+        return False
+    finally:
+        print("\n  [Teardown Bloque 7]")
+        for t, u in zip(tokens, users):
+            delete_user(t, u)
+
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -632,6 +753,7 @@ async def async_main():
     results["Aislamiento total de salas"]             = await run_isolation_test()
     results["Rendicion y Abandono Parcial (4P)"]      = await run_4p_abandonment_test()
     results["Resiliencia de Red Flickering (4P)"]     = await run_4p_flickering_recon_test()
+    results["Resiliencia en Lobby (grace period 3s)"] = await run_lobby_resilience_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")
