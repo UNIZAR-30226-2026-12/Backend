@@ -31,24 +31,29 @@ def create_initial_board() -> Board:
 def is_on_board(r: int, c: int) -> bool:
     return 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE
 
-def get_valid_moves(board: Board, player: Player) -> List[Coordinate]:
+def get_valid_moves(board: Board, player: Player, fixed_pieces: set = None) -> List[Coordinate]:
     moves = []
     if not player: return moves
     for r in range(BOARD_SIZE):
         for c in range(BOARD_SIZE):
-            if is_valid_move(board, player, r, c):
+            if is_valid_move(board, player, r, c, fixed_pieces):
                 moves.append(Coordinate(row=r, col=c))
     return moves
 
-def is_valid_move(board: Board, player: Player, row: int, col: int) -> bool:
+def is_valid_move(board: Board, player: Player, row: int, col: int, fixed_pieces: set = None) -> bool:
     if board[row][col] is not None: return False
     opponent = 'white' if player == 'black' else 'black'
+    if fixed_pieces is None: fixed_pieces = set()
     for dr, dc in DIRECTIONS:
         r, c = row + dr, col + dc
         found_opponent = False
         while is_on_board(r, c):
             cell = board[r][c]
-            if cell == opponent: found_opponent = True
+            if cell == opponent:
+                if (r, c) in fixed_pieces:
+                    found_opponent = False
+                    break
+                found_opponent = True
             elif cell == player:
                 if found_opponent: return True
                 break
@@ -57,22 +62,32 @@ def is_valid_move(board: Board, player: Player, row: int, col: int) -> bool:
             c += dc
     return False
 
-def apply_move(board: Board, player: Player, row: int, col: int) -> Board:
+def apply_move(board: Board, player: Player, row: int, col: int, fixed_pieces: set = None) -> Board:
     new_board = copy.deepcopy(board)
     new_board[row][col] = player
     opponent = 'white' if player == 'black' else 'black'
+    if fixed_pieces is None: fixed_pieces = set()
     for dr, dc in DIRECTIONS:
         r, c = row + dr, col + dc
         to_flip = []
+        possible_flip = False
         while is_on_board(r, c):
             cell = new_board[r][c]
-            if cell == opponent: to_flip.append((r, c))
+            if cell == opponent:
+                if (r, c) in fixed_pieces:
+                    to_flip = []
+                    break
+                to_flip.append((r, c))
             elif cell == player:
-                for fr, fc in to_flip: new_board[fr][fc] = player
+                if to_flip: possible_flip = True
                 break
-            else: break
+            else: 
+                to_flip = []
+                break
             r += dr
             c += dc
+        if possible_flip:
+            for fr, fc in to_flip: new_board[fr][fc] = player
     return new_board
 
 def count_score(board: Board) -> Dict[str, int]:
@@ -122,10 +137,11 @@ def create_initial_board_4p() -> List[List[Optional[str]]]:
 def is_inside_4p(row: int, col: int) -> bool:
     return 0 <= row < BOARD_SIZE_4P and 0 <= col < BOARD_SIZE_4P
 
-def get_flips_4p(board: List[List[Optional[str]]], row: int, col: int, piece: str) -> List[Tuple[int, int]]:
+def get_flips_4p(board: List[List[Optional[str]]], row: int, col: int, piece: str, fixed_pieces: set = None) -> List[Tuple[int, int]]:
     if board[row][col] is not None:
         return []
 
+    if fixed_pieces is None: fixed_pieces = set()
     flips: List[Tuple[int, int]] = []
     for dr, dc in DIRECTIONS_4P:
         line: List[Tuple[int, int]] = []
@@ -137,6 +153,9 @@ def get_flips_4p(board: List[List[Optional[str]]], row: int, col: int, piece: st
                 line = []
                 break
             if cell != piece:
+                if (r, c) in fixed_pieces:
+                    line = []
+                    break
                 line.append((r, c))
                 r += dr
                 c += dc
@@ -148,11 +167,11 @@ def get_flips_4p(board: List[List[Optional[str]]], row: int, col: int, piece: st
 
     return flips
 
-def get_valid_moves_4p(board: List[List[Optional[str]]], piece: str) -> List[Dict[str, int]]:
+def get_valid_moves_4p(board: List[List[Optional[str]]], piece: str, fixed_pieces: set = None) -> List[Dict[str, int]]:
     moves: List[Dict[str, int]] = []
     for row in range(BOARD_SIZE_4P):
         for col in range(BOARD_SIZE_4P):
-            if get_flips_4p(board, row, col, piece):
+            if get_flips_4p(board, row, col, piece, fixed_pieces):
                 moves.append({"row": row, "col": col})
     return moves
 

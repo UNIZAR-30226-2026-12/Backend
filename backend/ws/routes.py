@@ -264,6 +264,18 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 else: await manager.send_error(websocket, msg)
                 continue
 
+            if action == "use_skill":
+                success, msg = await game_manager.use_skill(game_id, assigned_piece, message)
+                if success:
+                    ns = game_manager.get_game_state(game_id)
+                    if ns and ns.get("game_over"):
+                        await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                        schedule_room_cleanup(game_id)
+                    await manager.broadcast_game_state(game_id, ns)
+                else:
+                    await manager.send_error(websocket, msg)
+                continue
+
     except Exception as e:
         manager.disconnect(websocket, game_id, username)
         if not (game := game_manager.get_game_state(game_id)): return
