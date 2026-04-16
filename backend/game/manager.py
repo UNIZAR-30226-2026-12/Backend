@@ -655,10 +655,12 @@ class GameManager:
         score["white"] = max(0, score["white"] - w_penalty)
         game["score"] = score
         
-        # Decide winner based on penalized score
-        if score["black"] > score["white"]: winner_color = "black"
-        elif score["white"] > score["black"]: winner_color = "white"
-        else: winner_color = "draw"
+        # Decide winner: respect existing winner (surrender) or compute from score
+        winner_color = game.get("winner")
+        if not winner_color or winner_color == "IA": # Fallback if not set or vs IA
+            if score["black"] > score["white"]: winner_color = "black"
+            elif score["white"] > score["black"]: winner_color = "white"
+            else: winner_color = "draw"
         
         s_b = f"{score['black']}-{score['white']}"
         s_w = f"{score['white']}-{score['black']}"
@@ -673,7 +675,7 @@ class GameManager:
 
         async def update_db(usr, ch, res, sc, col, opp):
             if usr:
-                await database.execute("UPDATE users SET elo=elo+:ch, peak_elo=GREATEST(COALESCE(peak_elo, elo), elo+:ch) WHERE id=:id", {"ch": ch, "id": usr["id"]})
+                await database.execute("UPDATE users SET elo=GREATEST(0, elo+:ch), peak_elo=GREATEST(COALESCE(peak_elo, elo), GREATEST(0, elo+:ch)) WHERE id=:id", {"ch": ch, "id": usr["id"]})
                 await database.execute("INSERT INTO game_history (user_id, opponent_name, mode, result, score, rank_change, player_color) VALUES (:uid, :opp, :m, :res, :sc, :rc, :col)",
                     {"uid": usr["id"], "opp": opp or "IA", "m": game.get("mode", "1v1"), "res": res, "sc": sc, "rc": f"{ch:+} RR", "col": col})
 
