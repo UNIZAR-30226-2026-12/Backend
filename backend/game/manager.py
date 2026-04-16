@@ -9,8 +9,9 @@ from rules.logic import (
     get_flips_4p, get_valid_moves_4p, count_score_4p, is_inside_4p
 )
 
-from game.skills import (
-    get_random_skill, apply_gravity, apply_bomb, swap_player_colors,
+from skills.registry import get_random_skill
+from skills.effects import (
+    apply_gravity, apply_bomb, swap_player_colors,
     apply_free_place, apply_flip_rival
 )
 import random
@@ -351,7 +352,7 @@ class GameManager:
             if not direction:
                 return False, "Direccion de gravedad no especificada"
             
-            game["board"] = apply_gravity(game["board"], direction, fixed_set)
+            game["board"], game["skill_tiles"] = apply_gravity(game["board"], direction, fixed_set, game.get("skill_tiles", []))
             success, msg = True, f"Gravedad aplicada hacia {direction}"
 
         elif skill_type == "bomb":
