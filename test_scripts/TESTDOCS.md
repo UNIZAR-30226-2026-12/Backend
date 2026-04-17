@@ -42,3 +42,9 @@
 * **Bloque 5: Rendición y Abandono Parcial (4P):** Gestiona la salida de jugadores individuales en modo 4P, permitiendo que la partida continúe para el resto, y procesando el bloqueo mutuo si todos abandonan.
 * **Bloque 6: Resiliencia de Red Flickering (4P):** Prueba la estabilidad ante reconexiones múltiples y simultáneas en el modo de 4 jugadores, manteniendo la persistencia de identidad y color.
 * **Bloque 7: Resiliencia en Lobby (Grace Period 3s):** Valida la protección temporal (3 segundos) frente a desconexiones en la sala de espera. Asegura que los cortes fugaces no expulsen a los invitados con pieza asignada, permite arrancar partidas tras reconexión, y destruye correctamente los lobbies inactivos si el abandono definitivo proviene de un anfitrión solitario.
+
+## 🎓 `test_skills.py`
+*Sistema de habilidades especiales, efectos en tablero y consumo de turnos.*
+
+* **Bloque 1: Habilidad Bomba (1v1):** Valida el efecto de la **Bomba 3x3** en modo 1v1, verificando la selección del objetivo, volteo de fichas en el área 3x3, inmunidad de fichas fijas y consumo del turno.
+* **Bloque 2: Habilidad Bomba (4P - Castigo al Menor):** Prueba la **Bomba 3x3** en modo 4 jugadores con la regla especial: fichas se asignan al jugador con **menos fichas** en tablero (en caso de empate, se decide aleatoriamente). Valida la correcta distribución y actualización del estado.

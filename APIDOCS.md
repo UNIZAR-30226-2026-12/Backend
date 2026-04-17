@@ -526,6 +526,36 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 
 ---
 
+### ⚡ SKILLS (`/api/skills`)
+
+#### 🟢 GET `/api/skills`
+**Obtiene la lista oficial de las 12 habilidades disponibles en el juego.**
+
+**Respuesta (200):**
+```json
+{
+  "skills": [
+    "gravity",
+    "bomb",
+    "fix_piece",
+    "unfix_piece",
+    "place_free",
+    "skip_rival",
+    "lose_turn",
+    "flip_rival",
+    "swap_colors",
+    "steal_skill",
+    "exchange_skill",
+    "give_skill"
+  ]
+}
+```
+
+> [!NOTE]
+> Para documentación detallada de cada habilidad, sus efectos, restricciones y limitaciones, consulta [backend/skills/info.md](./backend/skills/info.md).
+
+---
+
 ### 🎮 GAMES & LOBBY (`/api/games`)
 
 #### 🔵 POST `/api/games/create`
