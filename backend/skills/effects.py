@@ -1,3 +1,4 @@
+import random
 from typing import List, Optional, Set, Tuple
 
 def apply_gravity(
@@ -65,13 +66,29 @@ def apply_gravity(
             
     return new_board, new_question_cells
 
-def apply_bomb(board: List[List[Optional[str]]], row: int, col: int, player_color: str) -> List[List[Optional[str]]]:
+def apply_bomb(board: List[List[Optional[str]]], row: int, col: int, player_color: str, fixed_pieces: Set[Tuple[int, int]], mode: str, active_players: List[str]) -> List[List[Optional[str]]]:
     """Voltea todas las fichas en un área 3x3 al color del jugador."""
     size = len(board)
+    if mode in ("1v1v1v1", "1vs1vs1vs1"):
+        counts = {p: 0 for p in active_players}
+        for r in range(size):
+            for c in range(size):
+                if board[r][c] in counts:
+                    counts[board[r][c]] += 1
+                    
+        min_pieces = min(counts.values())
+        candidates = [p for p, count in counts.items() if count == min_pieces]
+        target_color_for_own = random.choice(candidates)
+    else:
+        target_color_for_own = "white" if player_color == "black" else "black"
+
     for r in range(max(0, row-1), min(size, row+2)):
         for c in range(max(0, col-1), min(size, col+2)):
-            if board[r][c] is not None:
-                board[r][c] = player_color
+            if board[r][c] is not None and (r, c) not in fixed_pieces:
+                if board[r][c] != player_color:
+                    board[r][c] = player_color
+                else:
+                    board[r][c] = target_color_for_own
     return board
 
 def swap_player_colors(board: List[List[Optional[str]]], p1: str, p2: str) -> List[List[Optional[str]]]:

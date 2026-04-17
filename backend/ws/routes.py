@@ -43,7 +43,7 @@ async def broadcast_room_sync(game_id: str):
         })
 
 def ensure_user_assigned_to_game(game: dict, username: str) -> Optional[str]:
-    if game.get("mode") == "1v1v1v1":
+    if game.get("mode") in ("1v1v1v1", "1v1v1v1_skills"):
         piece = game.get("piece_by_username", {}).get(username)
         if piece: return piece
         if username in game.get("participants", []):
@@ -160,6 +160,12 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
             if action == "debug_force_state":
                 game["board"] = message.get("board")
                 game["current_player"] = message.get("current_player")
+                await manager.broadcast_game_state(game_id, game)
+                continue
+            if action == "debug_give_skill":
+                target_player = message.get("player")
+                skill_to_give = message.get("skill")
+                game.setdefault("skills_inventory", {}).setdefault(target_player, []).append(skill_to_give)
                 await manager.broadcast_game_state(game_id, game)
                 continue
 

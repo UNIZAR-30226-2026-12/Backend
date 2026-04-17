@@ -46,10 +46,13 @@ class GameManager:
     def create_game(self, creator_name: str, is_private: bool = False, game_id: str = None, mode: str = "1v1", invited_name: str = None, participants: Optional[List[str]] = None) -> str:
         if not game_id: game_id = str(uuid.uuid4())
 
+        has_skills = "_skills" in mode
+        base_mode = mode.replace("_skills", "")
+
         normalized_mode = "1v1"
-        if mode in ("1vs1", "1v1"): normalized_mode = "1v1"
-        elif mode in ("1vs1vs1vs1", "1v1v1v1"): normalized_mode = "1v1v1v1"
-        elif mode == "vs_ai": normalized_mode = "vs_ai"
+        if base_mode in ("1vs1", "1v1"): normalized_mode = "1v1"
+        elif base_mode in ("1vs1vs1vs1", "1v1v1v1"): normalized_mode = "1v1v1v1"
+        elif base_mode == "vs_ai": normalized_mode = "vs_ai"
 
         participant_list: List[str] = [name for name in (participants or []) if name]
         if not participant_list:
@@ -66,7 +69,7 @@ class GameManager:
                 piece_by_username[username] = piece
 
             players_ready = {username: False for username in participant_list[:4]}
-            skill_tiles = self._generate_skill_tiles(normalized_mode)
+            skill_tiles = self._generate_skill_tiles(normalized_mode, has_skills)
             self.active_games[game_id] = {
                 "game_id": game_id, "creator": creator_name, "mode": normalized_mode, "status": "waiting",
                 "board": board, "current_player": "black", "winner": None, "game_over": False,
@@ -95,7 +98,7 @@ class GameManager:
         if white_player and white_player != "IA": players_ready[white_player] = False
         elif white_player == "IA": players_ready["IA"] = True
 
-        skill_tiles = self._generate_skill_tiles(normalized_mode)
+        skill_tiles = self._generate_skill_tiles(normalized_mode, has_skills)
         self.active_games[game_id] = {
             "game_id": game_id, "creator": creator_name, "mode": normalized_mode,
             "status": "playing" if normalized_mode == "vs_ai" else "waiting",
@@ -166,7 +169,8 @@ class GameManager:
         if len(participants) != game.get("participant_count_expected", 2): return False
         return all(bool(game.get("players_ready", {}).get(u, False)) for u in participants)
 
-    def _generate_skill_tiles(self, mode: str) -> List[List[int]]:
+    def _generate_skill_tiles(self, mode: str, has_skills: bool) -> List[List[int]]:
+        if not has_skills: return []
         size = 16 if mode == "1v1v1v1" else 8
         count = 10 if mode == "1v1v1v1" else 5
         tiles = []
@@ -358,7 +362,12 @@ class GameManager:
         elif skill_type == "bomb":
             r, c = skill_data.get("row"), skill_data.get("col")
             if r is None or c is None: return False, "Coordenadas faltantes"
-            game["board"] = apply_bomb(game["board"], r, c, player)
+
+            if game.get("mode") == "1v1v1v1":
+                active_players = [p for p in PIECES_4P if game.get("username_by_piece", {}).get(p)]
+            else:
+                active_players = ["black", "white"]
+            game["board"] = apply_bomb(board=game["board"], row=r, col=c, player_color=player, fixed_pieces=fixed_set, mode=game.get("mode"), active_players=active_players)
             success, msg = True, "Bomba 3x3 detonada"
 
         elif skill_type == "fix_piece":

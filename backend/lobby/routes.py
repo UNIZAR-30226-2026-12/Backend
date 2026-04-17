@@ -22,11 +22,15 @@ class ReadyRequest(BaseModel):
     ready: bool
 
 def normalize_mode(mode: str) -> str:
-    if mode in ("1vs1vs1vs1", "1v1v1v1"):
-        return "1v1v1v1"
-    if mode == "vs_ai":
-        return "vs_ai"
-    return "1v1"
+    has_skills = "_skills" in mode
+    base = mode.replace("_skills", "")
+    if base in ("1vs1vs1vs1", "1v1v1v1"):
+        result = "1v1v1v1"
+    elif base == "vs_ai":
+        result = "vs_ai"
+    else:
+        result = "1v1"
+    return result + ("_skills" if has_skills else "")
 
 async def get_lobby_participants(lobby_id: int) -> List[Dict]:
     lobby = await database.fetch_one("SELECT l.id, l.creator_id, cu.username AS creator_username FROM lobbies l JOIN users cu ON cu.id = l.creator_id WHERE l.id = :id", {"id": lobby_id})
@@ -66,7 +70,8 @@ async def get_game_or_create_from_lobby(lobby_id: int) -> Tuple[dict, dict]:
 
 @router.post("/create")
 async def create_public_lobby(req: GameCreateRequest, current_user: dict = Depends(get_current_user)):
-    is_public = req.mode in ("1vs1", "1v1", "1vs1vs1vs1", "1v1v1v1")
+    base_mode = req.mode.replace("_skills", "")
+    is_public = base_mode in ("1vs1", "1v1", "1vs1vs1vs1", "1v1v1v1")
     lobby_id = await database.fetch_val("INSERT INTO lobbies (creator_id, is_public, status, mode) VALUES (:cid, :pub, 'waiting', :m) RETURNING id",
         {"cid": current_user["id"], "pub": is_public, "m": req.mode})
     
@@ -84,7 +89,7 @@ async def get_public_lobbies():
             game_manager.create_game(creator_name=r["creator"], game_id=g_id, mode=normalize_mode(r["mode"]), participants=[r["creator"]])
         game = game_manager.get_game_state(g_id) or {}
         participants = game.get("participants", [])
-        expected = game.get("participant_count_expected", 4 if normalize_mode(r["mode"]) == "1v1v1v1" else 2)
+        expected = game.get("participant_count_expected", 4 if normalize_mode(r["mode"]).replace("_skills", "") == "1v1v1v1" else 2)
         lobbies.append({
             "game_id": g_id,
             "creator": r["creator"],
