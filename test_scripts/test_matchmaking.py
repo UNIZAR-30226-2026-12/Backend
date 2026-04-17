@@ -1,13 +1,3 @@
-"""
-TEST SUITE: MATCHMAKING, SALAS Y COMUNICACION EN PARTIDA
-=========================================================
-Cubre los siguientes ambitos:
-  1. Creacion de sala publica y visibilidad en el lobby
-  2. Union a sala y bloqueo de sala llena
-  3. Flujo de invitacion amistosa via WebSocket de notificaciones
-  4. Chat bidireccional en tiempo real dentro de una partida
-"""
-
 import asyncio
 import websockets
 import requests

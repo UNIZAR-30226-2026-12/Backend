@@ -1,13 +1,3 @@
-"""
-TEST SUITE: RESILIENCIA DE RED, RECONEXION Y AISLAMIENTO
-=========================================================
-Cubre los siguientes ambitos:
-  1. Flickering: desconexiones rapidas repetidas sin corrupcion de estado
-  2. Reconexion exitosa tras microcorte (partida supervive)
-  3. Abandono definitivo: timeout y declaracion de ganador por W/O
-  4. Aislamiento total de salas: sin interferencias entre partidas distintas
-"""
-
 import asyncio
 import websockets
 import requests

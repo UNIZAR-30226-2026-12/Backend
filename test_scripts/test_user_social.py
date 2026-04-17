@@ -1,15 +1,3 @@
-"""
-TEST SUITE: IDENTIDAD DE USUARIO, SISTEMA SOCIAL Y RANKING
-===========================================================
-Cubre los siguientes ambitos:
-  1. Registro y Login (Auth completo)
-  2. Perfil propio y actualizacion de datos
-  3. Personalizacion estetica del perfil
-  4. Estadisticas por usuario (ELO, winrate...)
-  5. Sistema de amigos: enviar, listar, aceptar, eliminar peticion
-  6. Leaderboard global (ranking)
-"""
-
 import requests
 import uuid
 import sys

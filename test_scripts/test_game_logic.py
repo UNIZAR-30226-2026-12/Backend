@@ -1,14 +1,3 @@
-"""
-TEST SUITE: LOGICA DE JUEGO, REGLAS Y MOTOR
-============================================
-Cubre los siguientes ambitos:
-  1. Flujo completo de partida vs IA (turnos, respuesta de IA)
-  2. Sincronizacion del tablero entre dos jugadores por WebSocket
-  3. Reglas y seguridad: control de turnos, movimientos ilegales, casillas ocupadas
-  4. Fin de partida: rendicion, calculo de ELO, persistencia en historial
-  5. Robustez del WebSocket ante datos corruptos (fuzzing)
-"""
-
 import asyncio
 import websockets
 import requests
