@@ -763,6 +763,17 @@ class GameManager:
             return
         if game and not game.get("saved"):
             game["saved"] = True
+            participants = [username for username in game.get("participants", []) if username]
+            usernames_by_piece = [
+                username for username in game.get("username_by_piece", {}).values() if username
+            ]
+            all_usernames = participants + usernames_by_piece
+            is_ai_game = game.get("mode") == "vs_ai" or any(
+                username == "IA" or username.startswith("IA_")
+                for username in all_usernames
+            )
+            if is_ai_game:
+                return
             if game.get("mode") == "1v1v1v1": await self._save_game_results_4p(game)
             else: await self._save_game_results_1v1(game)
 

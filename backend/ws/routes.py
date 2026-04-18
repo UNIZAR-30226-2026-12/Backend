@@ -24,15 +24,37 @@ def mode_to_api(mode: str) -> str:
     return mode
 
 async def get_room_players(game: dict) -> List[dict]:
-    parts = [u for u in game.get("participants", []) if u and u != "IA"]
-    if not parts: return []
-    rows = await database.fetch_all("SELECT id, username, elo, avatar_url FROM users WHERE username = ANY(:uns)", {"uns": parts})
+    parts = [u for u in game.get("participants", []) if u]
+    if not parts:
+        return []
+
+    human_parts = [u for u in parts if not u.startswith("IA")]
+    rows = await database.fetch_all(
+        "SELECT id, username, elo, avatar_url FROM users WHERE username = ANY(:uns)",
+        {"uns": human_parts},
+    ) if human_parts else []
     by_un = {r["username"]: r for r in rows}
-    
-    return [{
-        "id": by_un[u]["id"], "username": by_un[u]["username"], "rr": by_un[u]["elo"], 
-        "avatar_url": by_un[u]["avatar_url"], "is_ready": bool(game.get("players_ready", {}).get(u, False))
-    } for u in parts if u in by_un]
+
+    room_players = []
+    for username in parts:
+        if username.startswith("IA"):
+            room_players.append({
+                "id": -1,
+                "username": username,
+                "rr": 1000,
+                "avatar_url": "",
+                "is_ready": True,
+            })
+            continue
+        if username in by_un:
+            room_players.append({
+                "id": by_un[username]["id"],
+                "username": by_un[username]["username"],
+                "rr": by_un[username]["elo"],
+                "avatar_url": by_un[username]["avatar_url"],
+                "is_ready": bool(game.get("players_ready", {}).get(username, False)),
+            })
+    return room_players
 
 async def broadcast_room_sync(game_id: str):
     game = game_manager.get_game_state(game_id)

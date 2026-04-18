@@ -332,6 +332,18 @@ async def add_bot(game_id: str, current_user: dict = Depends(get_current_user)):
     bot_name = f"IA_{bot_num}"
     parts.append(bot_name)
     game.setdefault("players_ready", {})[bot_name] = True
+
+    if game.get("mode") in ("1v1v1v1", "1vs1vs1vs1", "1v1v1v1_skills", "1vs1vs1vs1_skills"):
+        username_by_piece = game.setdefault("username_by_piece", {})
+        piece_by_username = game.setdefault("piece_by_username", {})
+        active_pieces = game.setdefault("active_pieces", [])
+        for piece in ("black", "white", "red", "blue"):
+            if not username_by_piece.get(piece):
+                username_by_piece[piece] = bot_name
+                piece_by_username[bot_name] = piece
+                if piece not in active_pieces:
+                    active_pieces.append(piece)
+                break
     
     if len(parts) >= expected:
         await database.execute("UPDATE lobbies SET status = 'playing' WHERE id = :id", {"id": int(game_id)})
