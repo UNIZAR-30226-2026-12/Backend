@@ -374,12 +374,12 @@ def run_extra_coverage_test():
     id2 = requests.get(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {t2}"}).json()["id"]
 
     try:
-        step(1, "Recuperacion de credenciales (Forgot/Reset)")
+        step(1, "Recuperacion de credenciales (Forgot Password)")
         res_f = requests.post(f"{BASE_URL}/api/auth/forgot-password", json={"email": f"{u1}@test.com"})
         assert res_f.status_code in [200, 500], f"El endpoint de forgot-password fallo con HTTP {res_f.status_code}"
-        res_r = requests.post(f"{BASE_URL}/api/auth/reset-password", json={"email": f"{u1}@test.com", "code": "000000", "new_password": "123456"})
-        assert res_r.status_code in [200, 400, 404, 422], f"El endpoint de reset-password fallo con HTTP {res_r.status_code}"
-        ok("Endpoints de recuperacion accesibles y validados")
+        res_unknown = requests.post(f"{BASE_URL}/api/auth/forgot-password", json={"email": "inexistente@test.com"})
+        assert res_unknown.status_code == 200, f"forgot-password con email inexistente debe devolver 200 (no revelar), devolvio {res_unknown.status_code}"
+        ok("Endpoint de recuperacion accesible y no revela existencia de cuentas")
 
         step(2, "Subida de Avatares Segura (I/O Multipart)")
         files = {"file": ("avatar.png", b"fake_png_data", "image/png")}

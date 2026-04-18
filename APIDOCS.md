@@ -86,7 +86,14 @@ password=MiClaveSecreta
 ---
 
 #### 🔵 POST `/api/auth/forgot-password` *(Público)*
-**Solicitar código de recuperación de contraseña al email**
+**Generar una nueva contraseña aleatoria y enviarla al email del usuario.**
+
+Flujo interno:
+1. Busca el usuario por email (case-insensitive).
+2. Si no existe, devuelve 200 igualmente (no revela si el email está registrado).
+3. Si existe: genera contraseña aleatoria de 8 caracteres (mayúsculas + minúsculas + dígitos + símbolos `!@#$%&*-_+=?`), la hashea, **actualiza la BD primero** y **después** envía el correo en texto plano con la nueva contraseña.
+
+> El orden (BD antes que correo) garantiza que si falla el envío, la contraseña antigua quede invalidada y el usuario pueda reintentar sin quedar bloqueado con credenciales contradictorias.
 
 **Body requerido:**
 ```json
@@ -98,30 +105,12 @@ password=MiClaveSecreta
 **Respuesta (200):**
 ```json
 {
-  "message": "Correo de recuperación enviado"
+  "message": "Si el correo existe, recibirás una nueva contraseña"
 }
 ```
 
----
-
-#### 🔵 POST `/api/auth/reset-password` *(Público)*
-**Establecer nueva contraseña utilizando el código recibido al correo**
-
-**Body requerido:**
-```json
-{
-  "email": "user@mail.com",
-  "code": "123456",
-  "new_password": "NewPassword123"
-}
-```
-
-**Respuesta (200):**
-```json
-{
-  "message": "Contraseña restablecida correctamente"
-}
-```
+**Errores:**
+- `500` → Fallo al enviar el correo (la contraseña ya fue actualizada en BD).
 
 ---
 
