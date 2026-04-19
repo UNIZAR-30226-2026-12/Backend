@@ -6,10 +6,11 @@ import os
 from typing import List, Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from ai.engine import get_best_ai_move, get_best_ai_move_4p
+from ai.engine import get_best_ai_move, get_best_ai_move_4p, get_ai_skill_action
 from auth.dependencies import verify_token_ws
 from game.manager import TURN_ORDER_4P, game_manager
 from persistence.database import database
+from rules.logic import count_score, count_score_4p, get_valid_moves, get_valid_moves_4p
 from ws.manager import manager
 from ws.notifications import notifier
 
@@ -19,8 +20,11 @@ WAITING_ROOM_DISCONNECT_GRACE_SECONDS = float(
 )
 
 def mode_to_api(mode: str) -> str:
-    if mode == "1v1": return "1vs1"
-    if mode in ("1v1v1v1", "1vs1vs1vs1"): return "1vs1vs1vs1"
+    has_skills = "_skills" in mode
+    base = mode.replace("_skills", "")
+    suffix = "_skills" if has_skills else ""
+    if base == "1v1": return "1vs1" + suffix
+    if base in ("1v1v1v1", "1vs1vs1vs1"): return "1vs1vs1vs1" + suffix
     return mode
 
 async def get_room_players(game: dict) -> List[dict]:
@@ -143,7 +147,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         await websocket.send_json({"type": "player_assignment", "payload": {"color": assigned_piece}})
         game.setdefault("players_ready", {})[username] = False
 
-        if game.get("mode") == "vs_ai":
+        if game.get("mode", "").replace("_skills", "") == "vs_ai":
             game_manager.set_game_playing(game_id)
             await websocket.send_json({
                 "type": "game_state_update",
@@ -160,7 +164,59 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
             })
 
         last_message_time: float = 0.0
-        
+
+        def check_and_trigger_ai(current_state):
+            if not current_state or current_state.get("game_over"): return
+
+            c_player = current_state.get("current_player")
+            g_mode = current_state.get("mode", "")
+            base_g_mode = g_mode.replace("_skills", "")
+
+            is_1v1_ai = (base_g_mode == "vs_ai" and c_player == "white")
+            u_name = current_state.get("username_by_piece", {}).get(c_player)
+            is_4p_ai = (base_g_mode in ("1v1v1v1", "1vs1vs1vs1") and u_name and u_name.startswith("IA_"))
+
+            if is_1v1_ai or is_4p_ai:
+                async def play_ai_turn():
+                    await asyncio.sleep(0.5)
+                    current = game_manager.get_game_state(game_id)
+                    if not current or current.get("game_over"): return
+                    if current.get("paused_usernames"): return
+
+                    # Intentar usar habilidad si la IA tiene en inventario
+                    ai_skill_action = get_ai_skill_action(current, c_player)
+                    if ai_skill_action:
+                        skill_success, _ = await game_manager.use_skill(game_id, c_player, ai_skill_action)
+                        if skill_success:
+                            ais = game_manager.get_game_state(game_id)
+                            if ais and ais.get("game_over"):
+                                await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                                schedule_room_cleanup(game_id)
+                            await manager.broadcast_game_state(game_id, ais)
+                            check_and_trigger_ai(ais)
+                            return
+
+                    # Sin habilidades usables: movimiento normal
+                    fixed_set_ai = {tuple(p) for p in current.get("fixed_pieces", [])}
+                    if is_4p_ai:
+                        ai_move = await asyncio.to_thread(get_best_ai_move_4p, current["board"], c_player, fixed_set_ai)
+                        r, c = (ai_move["row"], ai_move["col"]) if ai_move else (None, None)
+                    else:
+                        ai_move = await asyncio.to_thread(get_best_ai_move, current["board"], c_player, fixed_set_ai)
+                        r, c = (ai_move.row, ai_move.col) if ai_move else (None, None)
+
+                    if r is not None and c is not None:
+                        ai_success, _ = await game_manager.make_move(game_id, c_player, r, c)
+                        if ai_success:
+                            ais = game_manager.get_game_state(game_id)
+                            if ais and ais.get("game_over"):
+                                await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
+                                schedule_room_cleanup(game_id)
+                            await manager.broadcast_game_state(game_id, ais)
+                            check_and_trigger_ai(ais)
+
+                asyncio.create_task(play_ai_turn())
+
         while True:
             data = await websocket.receive_text()
             
@@ -182,13 +238,36 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
             if action == "debug_force_state":
                 game["board"] = message.get("board")
                 game["current_player"] = message.get("current_player")
+                if "fixed_pieces" in message:
+                    game["fixed_pieces"] = message.get("fixed_pieces", [])
+                if "skills_inventory" in message:
+                    game["skills_inventory"] = message.get("skills_inventory", {})
+
+                fixed_set = {tuple(p) for p in game.get("fixed_pieces", [])}
+                mode = game.get("mode", "")
+                if mode.replace("_skills", "") in ("1v1v1v1", "1vs1vs1vs1"):
+                    game["score"] = count_score_4p(game["board"])
+                    current_piece = game.get("current_player")
+                    if current_piece:
+                        game["valid_moves"] = get_valid_moves_4p(game["board"], current_piece, fixed_set)
+                    else:
+                        game["valid_moves"] = []
+                else:
+                    game["score"] = count_score(game["board"])
+                    current_piece = game.get("current_player")
+                    if current_piece in ("black", "white"):
+                        game["valid_moves"] = [m.dict() for m in get_valid_moves(game["board"], current_piece, fixed_set)]
+                    else:
+                        game["valid_moves"] = []
                 await manager.broadcast_game_state(game_id, game)
+                check_and_trigger_ai(game)
                 continue
             if action == "debug_give_skill":
                 target_player = message.get("player")
                 skill_to_give = message.get("skill")
                 game.setdefault("skills_inventory", {}).setdefault(target_player, []).append(skill_to_give)
                 await manager.broadcast_game_state(game_id, game)
+                check_and_trigger_ai(game)
                 continue
 
             if action == "set_ready":
@@ -216,7 +295,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 continue
 
             if action == "surrender":
-                if game.get("mode") == "vs_ai":
+                if game.get("mode", "").replace("_skills", "") == "vs_ai":
                     success, msg = await game_manager.surrender_game(game_id, assigned_piece)
                 else:
                     # En partidas online tratamos "abandonar" como abandono real
@@ -239,7 +318,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     continue
                 
                 mode = game.get("mode", "1v1")
-                max_size = 16 if mode in ("1v1v1v1", "1vs1vs1vs1") else 8
+                max_size = 16 if mode.replace("_skills", "") in ("1v1v1v1", "1vs1vs1vs1") else 8
                 if row < 0 or row >= max_size or col < 0 or col >= max_size:
                     await manager.send_error(websocket, "Coordenadas fuera del tablero")
                     continue
@@ -251,42 +330,6 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                         await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
                         schedule_room_cleanup(game_id)
                     await manager.broadcast_game_state(game_id, ns)
-
-                    def check_and_trigger_ai(current_state):
-                        if not current_state or current_state.get("game_over"): return
-                        
-                        c_player = current_state.get("current_player")
-                        g_mode = current_state.get("mode", "1v1")
-                        
-                        is_1v1_ai = (g_mode == "vs_ai" and c_player == "white")
-                        u_name = current_state.get("username_by_piece", {}).get(c_player)
-                        is_4p_ai = (g_mode in ("1v1v1v1", "1vs1vs1vs1") and u_name and u_name.startswith("IA_"))
-
-                        if is_1v1_ai or is_4p_ai:
-                            async def play_ai_turn():
-                                await asyncio.sleep(0.5)
-                                if not game_manager.get_game_state(game_id): return
-                                if game_manager.get_game_state(game_id).get("paused_usernames"): return
-                                if is_4p_ai:
-                                    ai_move = await asyncio.to_thread(get_best_ai_move_4p, current_state["board"], c_player)
-                                    r, c = (ai_move["row"], ai_move["col"]) if ai_move else (None, None)
-                                else:
-                                    ai_move = await asyncio.to_thread(get_best_ai_move, current_state["board"], c_player)
-                                    r, c = (ai_move.row, ai_move.col) if ai_move else (None, None)
-                                
-                                if r is not None and c is not None:
-                                    ai_success, _ = await game_manager.make_move(game_id, c_player, r, c)
-                                    if ai_success:
-                                        ais = game_manager.get_game_state(game_id)
-                                        if ais and ais.get("game_over"): 
-                                            await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
-                                            schedule_room_cleanup(game_id)
-                                        await manager.broadcast_game_state(game_id, ais)
-                                        
-                                        check_and_trigger_ai(ais)
-
-                            asyncio.create_task(play_ai_turn())
-
                     check_and_trigger_ai(ns)
                     
                 else: await manager.send_error(websocket, msg)
@@ -300,6 +343,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                         await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
                         schedule_room_cleanup(game_id)
                     await manager.broadcast_game_state(game_id, ns)
+                    check_and_trigger_ai(ns)
                 else:
                     await manager.send_error(websocket, msg)
                 continue

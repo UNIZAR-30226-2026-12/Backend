@@ -133,8 +133,10 @@ async def join_public_lobby(game_id: str, current_user: dict = Depends(get_curre
 
 @router.post("/invite")
 async def invite_friend(req: GameInviteRequest, current_user: dict = Depends(get_current_user)):
-    mode = req.mode if req.mode in ("1vs1", "1vs1vs1vs1") else "1vs1"
-    expected = 1 if mode == "1vs1" else 3
+    VALID_FRIEND_MODES = {"1vs1", "1vs1vs1vs1", "1vs1_skills", "1vs1vs1vs1_skills"}
+    mode = req.mode if req.mode in VALID_FRIEND_MODES else "1vs1"
+    base_mode_invite = mode.replace("_skills", "")
+    expected = 1 if base_mode_invite == "1vs1" else 3
     friend_ids = list(dict.fromkeys(req.friend_ids))
     if len(friend_ids) != expected: raise HTTPException(status_code=400, detail=f"Requiere {expected} invitacion(es).")
     if current_user["id"] in friend_ids: raise HTTPException(status_code=400, detail="No puedes invitarte a ti")
