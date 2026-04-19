@@ -7,6 +7,7 @@
   - [🔐 Auth](#auth-apiauth)
   - [👤 Users & Avatar](#users--avatar-apiusers)
   - [🤝 Friends](#friends-apifriends)
+  - [⚡ Skills](#-skills-apiskills)
   - [🎮 Games & Lobby](#games--lobby-apigames)
   - [🏆 Ranking](#ranking-apiranking)
 - [⚡ WebSockets](#websockets)
@@ -553,7 +554,7 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 **Body requerido:**
 ```json
 {
-  "mode": "1vs1" | "1vs1vs1vs1" | "vs_ai"
+  "mode": "1vs1" | "1vs1vs1vs1" | "vs_ai" | "1vs1_skills" | "1vs1vs1vs1_skills" | "vs_ai_skills"
 }
 ```
 
@@ -611,7 +612,7 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 ```json
 {
   "friend_ids": [2],
-  "mode": "1vs1" | "1vs1vs1vs1"
+  "mode": "1vs1" | "1vs1vs1vs1" | "1vs1_skills" | "1vs1vs1vs1_skills"
 }
 ```
 
@@ -747,6 +748,7 @@ Como los `WebSockets` estándar no envían cabeceras de autorización custom fá
 - `{"action": "set_ready", "ready": true|false}`: Indicar que estás listo en el lobby.
 - `{"action": "make_move", "row": 0, "col": 0}`: Realizar un movimiento en el tablero.
 - `{"action": "chat", "message": "Hola!"}`: Enviar un mensaje de chat (Limitado a **280 caracteres**. Soporta sanitización `XSS` automática).
+- `{"action": "use_skill", "type": "bomb|gravity|fix_piece|..."}`: Usar una habilidad del inventario del jugador (puede requerir `row`/`col`/`target_player`/`direction` según la habilidad).
 - `{"action": "pause"}`: Pausar/Despausar la partida (Solo disponible en partidas privadas con amigos).
 - `{"action": "surrender"}`: Rendirse o abandonar la partida en curso.
 
@@ -758,7 +760,7 @@ Como los `WebSockets` estándar no envían cabeceras de autorización custom fá
 
 > [!TIP]
 > **Optimización de Rendimiento (AI):**
-> El motor de la `IA` se ejecuta en hilos secundarios mediante `asyncio.to_thread`. Esto garantiza que el `Event Loop` del servidor nunca se bloquee, manteniendo la latencia mínima incluso en tableros de `16x16`.
+> El motor de la `IA` se ejecuta en hilos secundarios mediante `asyncio.to_thread`. Esto garantiza que el `Event Loop` del servidor nunca se bloquee, manteniendo la latencia mínima incluso en tableros de `16x16`. En modos con `_skills`, la IA también puede consumir habilidades automáticamente cuando tenga opciones válidas en inventario.
 
 #### 📥 Mensajes del Servidor (JSON):
 - `{"type": "room_sync", "payload": {...}}`: Sincronización de los jugadores en el lobby (`RR`, avatares, estado listo).

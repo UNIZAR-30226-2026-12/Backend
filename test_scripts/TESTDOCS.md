@@ -48,3 +48,7 @@
 
 * **Bloque 1: Habilidad Bomba (1v1):** Valida el efecto de la **Bomba 3x3** en modo 1v1, verificando la selección del objetivo, volteo de fichas en el área 3x3, inmunidad de fichas fijas y consumo del turno.
 * **Bloque 2: Habilidad Bomba (4P - Castigo al Menor):** Prueba la **Bomba 3x3** en modo 4 jugadores con la regla especial: fichas se asignan al jugador con **menos fichas** en tablero (en caso de empate, se decide aleatoriamente). Valida la correcta distribución y actualización del estado.
+* **Bloque 3: Correcciones de Fichas Fijas:** Verifica reglas clave de `fix_piece`, `unfix_piece`, `flip_rival` y `swap_colors`, incluyendo castigos por uso inválido, persistencia de estado fijo y comportamiento de volteo tras liberar una ficha.
+* **Bloque 4: Bomba respeta ficha fija (radio 3x3):** Comprueba que una ficha fija dentro del área de la bomba no cambia de color, mientras que las no fijas sí se transforman según la regla de la habilidad.
+* **Bloque 5: Bomba en `vs_ai_skills`:** Valida que la IA en modo con habilidades puede usar bomba automáticamente en su turno y que el resultado respeta las restricciones de fichas fijas.
+* **Bloque 6: `fix_piece` vs IA (`vs_ai_skills`):** Asegura que una ficha fijada no puede ser volteada por movimientos normales de la IA y que permanece registrada en `fixed_pieces` tras el turno automático.
