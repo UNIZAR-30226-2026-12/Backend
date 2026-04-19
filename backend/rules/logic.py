@@ -96,13 +96,14 @@ def count_score(board: Board) -> Dict[str, int]:
         "white": sum(row.count('white') for row in board)
     }
 
-def resolve_game_state(board: List[List[Optional[str]]], next_player: str) -> Tuple[bool, Optional[str], Optional[str], list]:
-    valid_moves_next = get_valid_moves(board, next_player)
+def resolve_game_state(board: List[List[Optional[str]]], next_player: str, fixed_pieces: set = None) -> Tuple[bool, Optional[str], Optional[str], list]:
+    if fixed_pieces is None: fixed_pieces = set()
+    valid_moves_next = get_valid_moves(board, next_player, fixed_pieces)
     if len(valid_moves_next) > 0:
         return False, None, next_player, valid_moves_next
 
     other_player = "white" if next_player == "black" else "black"
-    valid_moves_other = get_valid_moves(board, other_player)
+    valid_moves_other = get_valid_moves(board, other_player, fixed_pieces)
     if len(valid_moves_other) > 0:
         return False, None, other_player, valid_moves_other
 

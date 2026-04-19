@@ -69,7 +69,7 @@ def apply_gravity(
 def apply_bomb(board: List[List[Optional[str]]], row: int, col: int, player_color: str, fixed_pieces: Set[Tuple[int, int]], mode: str, active_players: List[str]) -> List[List[Optional[str]]]:
     """Voltea todas las fichas en un área 3x3 al color del jugador."""
     size = len(board)
-    if mode in ("1v1v1v1", "1vs1vs1vs1"):
+    if mode is not None and mode.replace("_skills", "") in ("1v1v1v1", "1vs1vs1vs1"):
         counts = {p: 0 for p in active_players}
         for r in range(size):
             for c in range(size):
@@ -91,11 +91,13 @@ def apply_bomb(board: List[List[Optional[str]]], row: int, col: int, player_colo
                     board[r][c] = target_color_for_own
     return board
 
-def swap_player_colors(board: List[List[Optional[str]]], p1: str, p2: str) -> List[List[Optional[str]]]:
-    """Intercambia todas las fichas del tablero entre dos jugadores."""
+def swap_player_colors(board: List[List[Optional[str]]], p1: str, p2: str, fixed_pieces: Set[Tuple[int, int]] = None) -> List[List[Optional[str]]]:
+    """Intercambia todas las fichas del tablero entre dos jugadores. Las fichas fijas NO cambian de color."""
+    if fixed_pieces is None: fixed_pieces = set()
     size = len(board)
     for r in range(size):
         for c in range(size):
+            if (r, c) in fixed_pieces: continue
             if board[r][c] == p1: board[r][c] = p2
             elif board[r][c] == p2: board[r][c] = p1
     return board
@@ -107,7 +109,7 @@ def apply_free_place(board: List[List[Optional[str]]], r: int, c: int, color: st
     return board
 
 def apply_flip_rival(board: List[List[Optional[str]]], r: int, c: int, color: str, fixed_pieces: Set[Tuple[int, int]]):
-    """Volteo de ficha rival."""
-    if board[r][c] is not None and (r, c) not in fixed_pieces:
+    """Volteo de ficha rival. Las fichas fijas pueden cambiar de color (pero siguen siendo fijas)."""
+    if board[r][c] is not None:
         board[r][c] = color
     return board

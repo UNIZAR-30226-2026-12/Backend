@@ -16,6 +16,17 @@ from skills.effects import (
 )
 import random
 
+
+def _is_4p(mode: str) -> bool:
+    """True para cualquier modo de 4 jugadores (con o sin sufijo _skills)."""
+    return mode.replace("_skills", "") in ("1v1v1v1", "1vs1vs1vs1")
+
+
+def _is_1v1(mode: str) -> bool:
+    """True para cualquier modo 1v1 (con o sin sufijo _skills)."""
+    return mode.replace("_skills", "") in ("1v1", "1vs1")
+
+
 class GameManager:
     def __init__(self):
         self.active_games: Dict[str, dict] = {}
@@ -27,7 +38,7 @@ class GameManager:
         game["paused_usernames"] = paused_usernames
 
         paused_pieces: List[str] = []
-        if game.get("mode") == "1v1v1v1":
+        if _is_4p(game.get("mode", "")):
             piece_by_username = game.get("piece_by_username", {})
             for username in paused_usernames:
                 piece = piece_by_username.get(username)
@@ -53,13 +64,14 @@ class GameManager:
         if base_mode in ("1vs1", "1v1"): normalized_mode = "1v1"
         elif base_mode in ("1vs1vs1vs1", "1v1v1v1"): normalized_mode = "1v1v1v1"
         elif base_mode == "vs_ai": normalized_mode = "vs_ai"
+        if has_skills: normalized_mode += "_skills"
 
         participant_list: List[str] = [name for name in (participants or []) if name]
         if not participant_list:
             participant_list = [creator_name]
             if invited_name: participant_list.append(invited_name)
 
-        if normalized_mode == "1v1v1v1":
+        if _is_4p(normalized_mode):
             board = create_initial_board_4p()
             username_by_piece: Dict[str, Optional[str]] = {piece: None for piece in PIECES_4P}
             piece_by_username: Dict[str, str] = {}
@@ -92,7 +104,7 @@ class GameManager:
 
         board = create_initial_board()
         black_player = participant_list[0] if participant_list else creator_name
-        white_player = "IA" if normalized_mode == "vs_ai" else (participant_list[1] if len(participant_list) > 1 else None)
+        white_player = "IA" if normalized_mode.replace("_skills", "") == "vs_ai" else (participant_list[1] if len(participant_list) > 1 else None)
 
         players_ready = {black_player: False}
         if white_player and white_player != "IA": players_ready[white_player] = False
@@ -101,13 +113,13 @@ class GameManager:
         skill_tiles = self._generate_skill_tiles(normalized_mode, has_skills)
         self.active_games[game_id] = {
             "game_id": game_id, "creator": creator_name, "mode": normalized_mode,
-            "status": "playing" if normalized_mode == "vs_ai" else "waiting",
+            "status": "playing" if normalized_mode.replace("_skills", "") == "vs_ai" else "waiting",
             "board": board, "current_player": "black", "winner": None, "game_over": False,
             "score": count_score(board), "valid_moves": [m.dict() for m in get_valid_moves(board, "black")],
             "last_move": None, "db_game_id": None, "black_player": black_player, "white_player": white_player,
             "saved": False, "players_ready": players_ready,
             "participants": [n for n in [black_player, white_player] if n and n != "IA"],
-            "participant_count_expected": 1 if normalized_mode == "vs_ai" else 2,
+            "participant_count_expected": 1 if normalized_mode.replace("_skills", "") == "vs_ai" else 2,
             "paused_usernames": [], "paused_pieces": [], "invalidated": False, "invalidated_pieces": [],
             "is_private": bool(is_private),
             "skills_inventory": {"black": [], "white": []},
@@ -171,10 +183,11 @@ class GameManager:
 
     def _generate_skill_tiles(self, mode: str, has_skills: bool) -> List[List[int]]:
         if not has_skills: return []
-        size = 16 if mode == "1v1v1v1" else 8
-        count = 10 if mode == "1v1v1v1" else 5
+        is_4p = _is_4p(mode)
+        size = 16 if is_4p else 8
+        count = 10 if is_4p else 5
         tiles = []
-        board = create_initial_board_4p() if mode == "1v1v1v1" else create_initial_board()
+        board = create_initial_board_4p() if is_4p else create_initial_board()
         empty_tiles = []
         for r in range(size):
             for c in range(size):
@@ -231,7 +244,7 @@ class GameManager:
         if game.get("game_over") or game.get("invalidated"): return False, "La partida ha terminado o es invalida"
         if player in game.get("paused_pieces", []): return False, "Jugador en pausa"
 
-        if game.get("mode") == "1v1v1v1":
+        if _is_4p(game.get("mode", "")):
             if player not in game.get("active_pieces", []): return False, "Jugador no activo"
             if game["current_player"] != player: return False, "No es tu turno"
             
@@ -302,7 +315,7 @@ class GameManager:
             next_player = player # Next player is me again? No, in Reversi if opponent skips, it's still my turn? 
             # In 1v1 Reversi, skipping turn means THE OTHER player moves again if they can.
             
-        over, winner, current, valid = resolve_game_state(game["board"], next_player)
+        over, winner, current, valid = resolve_game_state(game["board"], next_player, fixed_pieces)
 
         game["game_over"] = over
         game["winner"] = winner
@@ -363,7 +376,7 @@ class GameManager:
             r, c = skill_data.get("row"), skill_data.get("col")
             if r is None or c is None: return False, "Coordenadas faltantes"
 
-            if game.get("mode") == "1v1v1v1":
+            if _is_4p(game.get("mode", "")):
                 active_players = [p for p in PIECES_4P if game.get("username_by_piece", {}).get(p)]
             else:
                 active_players = ["black", "white"]
@@ -379,10 +392,13 @@ class GameManager:
             success, msg = True, "Ficha fijada correctamente"
 
         elif skill_type == "unfix_piece":
-            r, c = skill_data.get("row"), skill_data.get("col")
-            if [r, c] not in game.get("fixed_pieces", []): return False, "No es una ficha fija"
-            game["fixed_pieces"].remove([r, c])
-            success, msg = True, "Ficha liberada correctamente"
+            if not game.get("fixed_pieces"):
+                success, msg = True, "No hay fichas fijas: habilidad desperdiciada"
+            else:
+                r, c = skill_data.get("row"), skill_data.get("col")
+                if [r, c] not in game.get("fixed_pieces", []): return False, "No es una ficha fija"
+                game["fixed_pieces"].remove([r, c])
+                success, msg = True, "Ficha liberada correctamente"
 
         elif skill_type == "place_free":
             r, c = skill_data.get("row"), skill_data.get("col")
@@ -391,9 +407,9 @@ class GameManager:
             success, msg = True, "Ficha libre colocada"
 
         elif skill_type == "skip_rival":
-            mode = game.get("mode")
+            mode = game.get("mode", "")
             rival = None
-            if mode == "1v1":
+            if _is_1v1(mode):
                 rival = "white" if player == "black" else "black"
             else:
                 turn_order = game["turn_order"]
@@ -421,7 +437,7 @@ class GameManager:
         elif skill_type == "swap_colors":
             target = skill_data.get("target_player")
             if not target or target == player: return False, "Objetivo no valido"
-            game["board"] = swap_player_colors(game["board"], player, target)
+            game["board"] = swap_player_colors(game["board"], player, target, fixed_set)
             success, msg = True, f"Colores intercambiados con {target}"
 
         elif skill_type == "steal_skill":
@@ -497,8 +513,8 @@ class GameManager:
         if success:
             inventory.pop(inventory_index) # Consumo final por indice
             # --- TURN CONCESSION ---
-            mode = game.get("mode")
-            if mode == "1v1v1v1":
+            mode = game.get("mode", "")
+            if _is_4p(mode):
                 game["score"] = count_score_4p(game["board"])
                 self._finalize_if_finished_4p(game)
                 if not game["game_over"]:
@@ -513,13 +529,13 @@ class GameManager:
                         else: game["game_over"] = True
                     else: game["game_over"] = True
                 if game.get("game_over"): await self.save_game_results(game_id)
-            else:
+            elif _is_1v1(mode):
                 game["score"] = count_score(game["board"])
                 next_p = "white" if player == "black" else "black"
                 if game["skip_next_turn"].get(next_p):
                     game["skip_next_turn"][next_p] = False
                     next_p = player
-                over, winner, curr, valid = resolve_game_state(game["board"], next_p)
+                over, winner, curr, valid = resolve_game_state(game["board"], next_p, fixed_set)
                 game["game_over"] = over
                 game["winner"] = winner
                 game["current_player"] = curr
@@ -535,7 +551,7 @@ class GameManager:
         game = self.active_games.get(game_id)
         if not game or game["game_over"]: return False, "No es posible rendirse"
 
-        if game.get("mode") == "1v1v1v1":
+        if _is_4p(game.get("mode", "")):
             username = game.get("username_by_piece", {}).get(player, player)
             return await self.abandon_game(game_id, username)
 
@@ -554,7 +570,7 @@ class GameManager:
         paused_usernames = game.get("paused_usernames", [])
         disconnected_was_paused = disconnected_username in paused_usernames
         if paused_usernames and not disconnected_was_paused:
-            if mode == "1v1":
+            if _is_1v1(mode):
                 game["invalidated"] = True
                 game["game_over"] = True
                 game["winner"] = None
@@ -565,7 +581,7 @@ class GameManager:
                 game["paused_pieces"] = []
                 return True, f"{disconnected_username} abandono y la partida ha sido invalidada sin cambios de RR"
 
-            if mode == "1v1v1v1":
+            if _is_4p(mode):
                 piece = game.get("piece_by_username", {}).get(disconnected_username)
                 if not piece or piece not in game.get("active_pieces", []):
                     return False, "Jugador inactivo"
@@ -611,7 +627,7 @@ class GameManager:
                         game["valid_moves"] = get_valid_moves_4p(game["board"], next_piece)
                 return True, f"{disconnected_username} abandono la partida pausada sin cambios de RR para ese jugador"
 
-        if mode == "1v1v1v1":
+        if _is_4p(mode):
             piece = game.get("piece_by_username", {}).get(disconnected_username)
             if not piece or piece not in game.get("active_pieces", []): return False, "Jugador inactivo"
             game["active_pieces"].remove(piece)
@@ -768,13 +784,13 @@ class GameManager:
                 username for username in game.get("username_by_piece", {}).values() if username
             ]
             all_usernames = participants + usernames_by_piece
-            is_ai_game = game.get("mode") == "vs_ai" or any(
+            is_ai_game = game.get("mode", "").replace("_skills", "") == "vs_ai" or any(
                 username == "IA" or username.startswith("IA_")
                 for username in all_usernames
             )
             if is_ai_game:
                 return
-            if game.get("mode") == "1v1v1v1": await self._save_game_results_4p(game)
+            if _is_4p(game.get("mode", "")): await self._save_game_results_4p(game)
             else: await self._save_game_results_1v1(game)
 
 game_manager = GameManager()
