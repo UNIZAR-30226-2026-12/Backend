@@ -163,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 "payload": game_manager.get_game_state(game_id)
             })
 
-        last_message_time: float = 0.0
+        last_chat_time: float = 0.0
 
         def check_and_trigger_ai(current_state):
             if not current_state or current_state.get("game_over"): return
@@ -220,12 +220,6 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         while True:
             data = await websocket.receive_text()
             
-            # ANTI-SPAM (maximo un mensaje cada 0.5s)
-            now = time.monotonic()
-            if now - last_message_time < 0.5:
-                continue  # Ignorar mensaje
-            last_message_time = now
-            
             # PROTECCION ANTI-BASURA DE RED
             try: message = json.loads(data)
             except (json.JSONDecodeError, ValueError):
@@ -280,6 +274,12 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 continue
 
             if action == "chat":
+                # ANTI-SPAM (maximo un mensaje cada 0.5s)
+                now = time.monotonic()
+                if now - last_chat_time < 0.5:
+                    continue  # Ignorar spam de chat
+                last_chat_time = now
+
                 raw_msg = str(message.get("message", ""))[:280]
                 msg_txt = html.escape(raw_msg)
                 if msg_txt.strip():

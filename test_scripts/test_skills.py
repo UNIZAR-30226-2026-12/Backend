@@ -90,8 +90,8 @@ async def run_bomb_1v1_test():
                 await safe_recv(ws2, timeout=0.5)
 
             step(2, "Dando 'Ready' a ambos jugadores para arrancar la partida...")
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
-            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
             
             for _ in range(5):
                 msg = await safe_recv(ws1, timeout=1.0)
@@ -105,8 +105,8 @@ async def run_bomb_1v1_test():
             for r, c in black_pos: test_board[r][c] = "black"
             for r, c in white_pos: test_board[r][c] = "white"
 
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "debug_force_state", "board": test_board, "current_player": "black"}))
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "bomb"}))
+            await ws1.send(json.dumps({"action": "debug_force_state", "board": test_board, "current_player": "black"}))
+            await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "bomb"}))
 
             state_pre = None
             for _ in range(10):
@@ -119,7 +119,7 @@ async def run_bomb_1v1_test():
             print_ascii_board(state_pre["payload"]["board"])
 
             step(4, "Negras detonan bomba en (4,3) — su pieza en zona de blancos...")
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 4, "col": 3}))
+            await ws1.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 4, "col": 3}))
 
             # Buscamos la respuesta comprobando que la bomba se ha gastado del inventario
             state_post = None
@@ -151,7 +151,7 @@ async def run_bomb_1v1_test():
             step(5, "Verificar que el rival no puede usar una bomba que no tiene...")
             while await safe_recv(ws2, timeout=0.2): pass # Limpiamos basura del ws2
             
-            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 0, "col": 0}))
+            await ws2.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 0, "col": 0}))
             err2 = None
             for _ in range(10):
                 msg = await safe_recv(ws2, timeout=1.0)
@@ -198,10 +198,10 @@ async def run_bomb_4p_test():
             
             step(2, "Arrancando la partida por WebSocket (forzando ready a todos)...")
             await asyncio.sleep(1.2)
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
-            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
-            await asyncio.sleep(0.6); await ws3.send(json.dumps({"action": "set_ready", "ready": True}))
-            await asyncio.sleep(0.6); await ws4.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws3.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws4.send(json.dumps({"action": "set_ready", "ready": True}))
             
             state_playing = None
             for _ in range(15):
@@ -243,8 +243,8 @@ async def run_bomb_4p_test():
             for r,c in blue_pos_4p:  test_board[r][c] = "blue"
             for r,c in red_pos_4p:   test_board[r][c] = "red"
 
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "debug_force_state", "board": test_board, "current_player": "black"}))
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "bomb"}))
+            await ws1.send(json.dumps({"action": "debug_force_state", "board": test_board, "current_player": "black"}))
+            await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "bomb"}))
             
             state_pre = None
             for _ in range(10):
@@ -257,7 +257,7 @@ async def run_bomb_4p_test():
             print_ascii_board(state_pre["payload"]["board"], size=16)
 
             step(4, "Negras detonan bomba en (8,8) — encrucijada de los 4 colores...")
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 8, "col": 8}))
+            await ws1.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 8, "col": 8}))
 
             state_post = None
             for _ in range(15):
@@ -326,8 +326,8 @@ async def run_fixed_pieces_test():
                 await safe_recv(ws2, timeout=0.5)
 
             step(2, "Ready de ambos jugadores...")
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
-            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
 
             for _ in range(8):
                 msg = await safe_recv(ws1, timeout=1.0)
@@ -346,7 +346,6 @@ async def run_fixed_pieces_test():
             test_board[5][3] = "black"
             test_board[5][4] = "black"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board,
@@ -354,7 +353,6 @@ async def run_fixed_pieces_test():
                 "skills_inventory": {"black": [], "white": []}
             }))
             for skill in ["fix_piece", "flip_rival", "swap_colors", "unfix_piece"]:
-                await asyncio.sleep(0.6)
                 await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": skill}))
 
             state_with_skills = None
@@ -373,7 +371,6 @@ async def run_fixed_pieces_test():
             # SUB-TEST 3a: Movimientos válidos con ficha fija
             # ══════════════════════════════════════════
             step(4, "[3a] Fijando ficha negra en (3,4) con fix_piece y comprobando valid_moves...")
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "fix_piece",
@@ -412,7 +409,6 @@ async def run_fixed_pieces_test():
             test_board2[5][3] = "black"
             test_board2[5][4] = "black"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board2,
@@ -420,7 +416,6 @@ async def run_fixed_pieces_test():
                 "fixed_pieces": [],
                 "skills_inventory": {"black": [], "white": []}
             }))
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "unfix_piece"}))
 
             state_clean = None
@@ -435,7 +430,6 @@ async def run_fixed_pieces_test():
             assert state_clean is not None, "No se recibió el estado limpio con unfix_piece"
             ok("Tablero sin fichas fijas listo. Usando unfix_piece como castigo...")
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "unfix_piece",
@@ -470,7 +464,6 @@ async def run_fixed_pieces_test():
             test_board3[5][3] = "black"
             test_board3[5][4] = "black"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board3,
@@ -478,7 +471,6 @@ async def run_fixed_pieces_test():
                 "fixed_pieces": [[4, 4]],
                 "skills_inventory": {"black": [], "white": []}
             }))
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "flip_rival"}))
 
             state_flip_ready = None
@@ -495,7 +487,6 @@ async def run_fixed_pieces_test():
             assert state_flip_ready is not None, "Estado con flip_rival + ficha fija blanca no recibido"
             ok("Preparado: flip_rival disponible, (4,4) blanca y fija.")
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "flip_rival",
@@ -536,7 +527,6 @@ async def run_fixed_pieces_test():
             test_board4[5][3] = "black"
             test_board4[5][4] = "black"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board4,
@@ -544,7 +534,6 @@ async def run_fixed_pieces_test():
                 "fixed_pieces": [[3, 4]],
                 "skills_inventory": {"black": [], "white": []}
             }))
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "swap_colors"}))
 
             state_swap_ready = None
@@ -561,7 +550,6 @@ async def run_fixed_pieces_test():
             assert state_swap_ready is not None, "Estado con swap_colors + ficha fija negra no recibido"
             ok("Preparado: swap_colors disponible, (3,4) negra y fija.")
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "swap_colors",
@@ -602,7 +590,6 @@ async def run_fixed_pieces_test():
             test_board5[5][3] = "black"
             test_board5[5][4] = "black"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board5,
@@ -610,7 +597,6 @@ async def run_fixed_pieces_test():
                 "fixed_pieces": [[3, 4]],
                 "skills_inventory": {"black": [], "white": []}
             }))
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "unfix_piece"}))
 
             state_unfix_ready = None
@@ -626,7 +612,6 @@ async def run_fixed_pieces_test():
             assert state_unfix_ready is not None, "No se recibió estado con unfix_piece + ficha fija blanca"
             ok("Preparado: unfix_piece disponible, (3,4) blanca y fija.")
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "unfix_piece",
@@ -666,7 +651,6 @@ async def run_fixed_pieces_test():
             test_board6[2][4] = "black"
             test_board6[2][3] = "black"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board6,
@@ -692,7 +676,6 @@ async def run_fixed_pieces_test():
             assert can_play_32, \
                 f"(3,2) debería ser válido para negro (voltea (3,3) y (3,4) ya libres), pero valid_moves={valid_moves_now}"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "make_move", "row": 3, "col": 2}))
 
             state_after_move = None
@@ -717,7 +700,6 @@ async def run_fixed_pieces_test():
             # SUB-TEST 3g: fix_piece sobre celda rival o vacía es rechazado
             # ══════════════════════════════════════════
             step(10, "[3g] fix_piece sobre celda rival o vacía debe ser rechazada por el servidor...")
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "fix_piece"}))
 
             state_fix_inv = None
@@ -731,7 +713,6 @@ async def run_fixed_pieces_test():
 
             assert state_fix_inv is not None, "No se recibió estado con fix_piece para el test de rechazo"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "fix_piece",
@@ -755,7 +736,6 @@ async def run_fixed_pieces_test():
             ok("fix_piece sobre celda rival fue rechazado correctamente. ✓")
 
             # Intento 2: fix_piece sobre celda vacía (0,0)
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "use_skill",
                 "type": "fix_piece",
@@ -816,8 +796,8 @@ async def run_bomb_respects_fixed_test():
                 await safe_recv(ws2, timeout=0.5)
 
             step(2, "Ready de ambos...")
-            await asyncio.sleep(0.6); await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
-            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
             for _ in range(8):
                 msg = await safe_recv(ws1, timeout=1.0)
                 if msg and msg.get("type") == "game_state_update" and msg.get("payload", {}).get("status") == "playing":
@@ -835,14 +815,12 @@ async def run_bomb_respects_fixed_test():
             test_board[5][4] = "white"
             test_board[5][5] = "white"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board,
                 "current_player": "black",
                 "fixed_pieces": [[4, 4]]   # (4,4) blanca FIJA
             }))
-            await asyncio.sleep(0.6)  # >= 0.5s para evitar el anti-spam del WS
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "bomb"}))
 
             state_pre = None
@@ -859,7 +837,6 @@ async def run_bomb_respects_fixed_test():
             print_ascii_board(state_pre["payload"]["board"])
 
             step(4, "Negras lanzan la bomba centrada en (4,4) — donde está la ficha FIJA blanca...")
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "use_skill", "type": "bomb", "row": 4, "col": 4}))
 
             state_post = None
@@ -939,14 +916,12 @@ async def run_bomb_vs_ai_test():
             for r, c in black_pos: test_board[r][c] = "black"
             for r, c in white_pos: test_board[r][c] = "white"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board,
                 "current_player": "black",   # negro mueve → check_and_trigger_ai NO activa la IA
                 "fixed_pieces": [[3, 2]]
             }))
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({"action": "debug_give_skill", "player": "white", "skill": "bomb"}))
 
             state_pre = None
@@ -964,7 +939,6 @@ async def run_bomb_vs_ai_test():
             ok("Bomba en inventario de IA confirmada.")
 
             step(3, "Activando turno IA (ya tiene la bomba). El servidor debe usarla automáticamente...")
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": state_pre["payload"]["board"],
@@ -1056,7 +1030,6 @@ async def run_fix_piece_vs_ai_test():
             test_board[2][4] = "black"
             test_board[2][3] = "white"
 
-            await asyncio.sleep(0.6)
             await ws1.send(json.dumps({
                 "action": "debug_force_state",
                 "board": test_board,

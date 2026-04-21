@@ -97,7 +97,6 @@ async def safe_recv(ws, label="WS", timeout=3.0):
             tipo = data.get("type", "?")
             
             if tipo == "waiting_for_player":
-                await asyncio.sleep(0.6)
                 await ws.send(json.dumps({"action": "set_ready", "ready": True}))
                 debug(f"[{label}] Auto-ready enviado.")
                 deadline = loop.time() + timeout  # Reiniciar deadline tras consumir waiting_for_player
@@ -206,7 +205,7 @@ async def run_flickering_test():
 
                 step(6, "Realizando movimiento tras reconexion para confirmar funcionalidad...")
                 mov = {"action": "make_move", "row": 2, "col": 3, "player": "black"}
-                await asyncio.sleep(0.6); await ws1.send(json.dumps(mov))
+                await ws1.send(json.dumps(mov))
                 res_mov = await safe_recv(ws1, label=f"mov-post-flicker-{u1}", timeout=4.0)
                 assert res_mov is not None, \
                     "El servidor no respondio al movimiento tras el flickering"
@@ -444,7 +443,7 @@ async def run_isolation_test():
 
             step(4, f"Jugador A1 ({names[0]}) realiza un movimiento en la Sala A...")
             movimiento = {"action": "make_move", "row": 2, "col": 3, "player": "black"}
-            await asyncio.sleep(0.6); await ws_a1.send(json.dumps(movimiento))
+            await ws_a1.send(json.dumps(movimiento))
             debug(f"Movimiento enviado en Sala A: {movimiento}")
 
             step(5, "Verificando que A2 recibe la actualizacion de la Sala A...")
@@ -472,7 +471,7 @@ async def run_isolation_test():
             ok("Silencio total en la Sala B. Las salas estan perfectamente aisladas")
 
             step(7, "Verificacion inversa: movimiento en Sala B no llega a Sala A...")
-            await asyncio.sleep(0.6); await ws_b1.send(json.dumps({"action": "make_move", "row": 5, "col": 4, "player": "black"}))
+            await ws_b1.send(json.dumps({"action": "make_move", "row": 5, "col": 4, "player": "black"}))
             debug("Movimiento enviado en Sala B...")
 
             # Consumir la actualizacion legitima de B2
@@ -520,7 +519,7 @@ async def run_4p_abandonment_test():
             await asyncio.gather(wait_for_game_update(ws0), wait_for_game_update(ws1), wait_for_game_update(ws2), wait_for_game_update(ws3))
 
             step(2, "Rendicion Parcial...")
-            await asyncio.sleep(0.6); await ws0.send(json.dumps({"action": "surrender", "player": "black"}))
+            await ws0.send(json.dumps({"action": "surrender", "player": "black"}))
             estado = await wait_for_game_update(ws1)
             assert not estado["payload"]["game_over"], "La partida termino erroneamente"
             assert "black" not in estado["payload"].get("active_pieces", []), "Black no quitado"
@@ -540,8 +539,8 @@ async def run_4p_abandonment_test():
             ok("Expulsion por timeout parcial (30s) procesada con exito")
 
             step(4, "Bloqueo Mutuo Prematuro (todos se rinden)...")
-            await asyncio.sleep(0.6); await ws2.send(json.dumps({"action": "surrender"}))
-            await asyncio.sleep(0.6); await ws3.send(json.dumps({"action": "surrender"}))
+            await ws2.send(json.dumps({"action": "surrender"}))
+            await ws3.send(json.dumps({"action": "surrender"}))
             
             game_over_reached = False
             for _ in range(10):
@@ -678,7 +677,6 @@ async def run_lobby_resilience_test():
         await safe_recv(ws_g2, label="C4-g2-recon", timeout=5.0)
 
         for ws in [ws_host, ws_g1, ws_g2, ws_g3]:
-            await asyncio.sleep(0.5)
             await ws.send(json.dumps({"action": "set_ready", "ready": True}))
         await asyncio.gather(
             wait_for_game_update(ws_host),
