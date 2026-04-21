@@ -11,19 +11,20 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 async def send_new_password_email(to_email: str, new_password: str):
     body = (
         "Hola,\n\n"
-        "Hemos recibido una solicitud para recuperar el acceso a tu cuenta de Reversi.\n\n"
+        "Hemos recibido una solicitud para recuperar el acceso a tu cuenta de Random Reversi.\n\n"
         "Tu nueva contraseña es:\n\n"
         f"    {new_password}\n\n"
         "Puedes iniciar sesión con ella en cualquier momento.\n"
         "Te recomendamos cambiarla por una propia en cuanto accedas.\n\n"
         "Si no solicitaste este cambio, contacta con nosotros respondiendo a este correo.\n\n"
-        "— El equipo de Reversi\n"
+        "Atentamente,\n"
+        "— El equipo de Random Reversi\n"
     )
 
     message = MIMEText(body, "plain", "utf-8")
     message["From"] = SMTP_USER
     message["To"] = to_email
-    message["Subject"] = "Tu nueva contraseña de Reversi"
+    message["Subject"] = "Tu nueva contraseña de Random Reversi"
 
     await aiosmtplib.send(
         message,
