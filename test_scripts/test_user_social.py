@@ -211,13 +211,15 @@ def run_social_test():
         step(5, "Verificando relacion mutua en ambas listas de amigos...")
         lista_u1 = requests.get(f"{BASE_URL}/api/friends", headers=h1).json()
         lista_u2 = requests.get(f"{BASE_URL}/api/friends", headers=h2).json()
-        debug(f"Amigos de '{u1}': {lista_u1.get('friends')}")
-        debug(f"Amigos de '{u2}': {lista_u2.get('friends')}")
+        all_friends_u1 = lista_u1.get("online", []) + lista_u1.get("offline", [])
+        all_friends_u2 = lista_u2.get("online", []) + lista_u2.get("offline", [])
+        debug(f"Amigos de '{u1}': {all_friends_u1}")
+        debug(f"Amigos de '{u2}': {all_friends_u2}")
 
         en_u1 = any((f.get("name") or f.get("username")) == u2
-                    for f in lista_u1.get("friends", []))
+                    for f in all_friends_u1)
         en_u2 = any((f.get("name") or f.get("username")) == u1
-                    for f in lista_u2.get("friends", []))
+                    for f in all_friends_u2)
         assert en_u1, f"'{u2}' no aparece en la lista de amigos de '{u1}'"
         assert en_u2, f"'{u1}' no aparece en la lista de amigos de '{u2}'"
         ok("Ambos usuarios se ven mutuamente como amigos")
@@ -240,11 +242,13 @@ def run_social_test():
         step(8, "Verificando que la amistad ya no existe en ninguna lista...")
         final_u1 = requests.get(f"{BASE_URL}/api/friends", headers=h1).json()
         final_u2 = requests.get(f"{BASE_URL}/api/friends", headers=h2).json()
-        debug(f"Amigos restantes de '{u1}': {final_u1.get('friends')}")
-        debug(f"Amigos restantes de '{u2}': {final_u2.get('friends')}")
+        all_final_u1 = final_u1.get("online", []) + final_u1.get("offline", [])
+        all_final_u2 = final_u2.get("online", []) + final_u2.get("offline", [])
+        debug(f"Amigos restantes de '{u1}': {all_final_u1}")
+        debug(f"Amigos restantes de '{u2}': {all_final_u2}")
 
         sigue_u1 = any((f.get("name") or f.get("username")) == u2
-                       for f in final_u1.get("friends", []))
+                       for f in all_final_u1)
         assert not sigue_u1, \
             f"'{u2}' todavia aparece en la lista de '{u1}' tras eliminarle"
         ok("Relacion eliminada correctamente. Ninguno se ve en la lista del otro")

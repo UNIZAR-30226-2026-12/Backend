@@ -3,6 +3,7 @@ from persistence.database import database
 from auth.dependencies import get_current_user
 from friends.schemas import FriendRequest, ChatMessageCreate
 from game.manager import game_manager
+from ws.manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -112,10 +113,21 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
             "active_players": active_usernames,
         })
 
+    online_friends = []
+    offline_friends = []
+    for row in friends_rows:
+        friend_data = dict(row)
+        friend_username = friend_data.get("name", "")
+        if friend_username in ws_manager.active_users:
+            friend_data["status"] = "online"
+            online_friends.append(friend_data)
+        else:
+            friend_data["status"] = "offline"
+            offline_friends.append(friend_data)
+
     return {
-        "friends": [
-            {**dict(row), "status": "online"} for row in friends_rows # Mock status online
-        ],
+        "online": online_friends,
+        "offline": offline_friends,
         "requests": [dict(row) for row in requests_rows],
         "gameRequests": [dict(row) for row in game_invites_rows],
         "pausedGames": paused_games

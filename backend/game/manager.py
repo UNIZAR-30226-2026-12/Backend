@@ -23,8 +23,8 @@ def _is_4p(mode: str) -> bool:
 
 
 def _is_1v1(mode: str) -> bool:
-    """True para cualquier modo 1v1 (con o sin sufijo _skills)."""
-    return mode.replace("_skills", "") in ("1v1", "1vs1")
+    """True para cualquier modo 1v1 o vs_ai (con o sin sufijo _skills)."""
+    return mode.replace("_skills", "") in ("1v1", "1vs1", "vs_ai")
 
 
 class GameManager:
@@ -392,13 +392,13 @@ class GameManager:
             success, msg = True, "Ficha fijada correctamente"
 
         elif skill_type == "unfix_piece":
-            if not game.get("fixed_pieces"):
-                success, msg = True, "No hay fichas fijas: habilidad desperdiciada"
-            else:
-                r, c = skill_data.get("row"), skill_data.get("col")
-                if [r, c] not in game.get("fixed_pieces", []): return False, "No es una ficha fija"
-                game["fixed_pieces"].remove([r, c])
-                success, msg = True, "Ficha liberada correctamente"
+            r, c = skill_data.get("row"), skill_data.get("col")
+            if r is None or c is None:
+                return False, "Coordenadas faltantes"
+            if [r, c] not in game.get("fixed_pieces", []):
+                return False, "No es una ficha fija"
+            game["fixed_pieces"].remove([r, c])
+            success, msg = True, "Ficha liberada correctamente"
 
         elif skill_type == "place_free":
             r, c = skill_data.get("row"), skill_data.get("col")

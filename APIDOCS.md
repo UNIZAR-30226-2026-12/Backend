@@ -372,8 +372,11 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 **Respuesta (200):**
 ```json
 {
-  "friends": [
+  "online": [
      { "id": 2, "name": "Pedro", "rr": 1200, "avatar_url": "...", "unread_count": 0, "status": "online" }
+  ],
+  "offline": [
+     { "id": 3, "name": "Marta", "rr": 1150, "avatar_url": "...", "unread_count": 0, "status": "offline" }
   ],
   "requests": [
      { "id": 5, "name": "Maria", "rr": 1000, "avatar_url": "..." }
@@ -612,7 +615,7 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 ```json
 {
   "friend_ids": [2],
-  "mode": "1vs1" | "1vs1vs1vs1" | "1vs1_skills" | "1vs1vs1vs1_skills"
+  "mode": "1vs1" | "1v1" | "1vs1vs1vs1" | "1v1v1v1" | "1vs1_skills" | "1v1_skills" | "1vs1vs1vs1_skills" | "1v1v1v1_skills"
 }
 ```
 
