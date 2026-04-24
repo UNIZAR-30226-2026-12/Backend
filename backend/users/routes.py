@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List
+from typing import List, Optional
 from collections import Counter
 from persistence.database import database
 from auth.dependencies import get_current_user
@@ -443,7 +443,7 @@ async def create_my_history_entry(
 async def get_my_history(
     current_user: dict = Depends(get_current_user),
     limit: int = Query(10, ge=1, le=100),
-    mode: str | None = Query(default=None),
+    mode: Optional[str] = Query(default=None),
 ):
     return await get_user_history_data(current_user["id"], limit=limit, mode=mode)
 
@@ -452,12 +452,12 @@ async def get_my_history(
 async def get_user_history(
     user_id: int,
     limit: int = Query(10, ge=1, le=100),
-    mode: str | None = Query(default=None),
+    mode: Optional[str] = Query(default=None),
 ):
     return await get_user_history_data(user_id, limit=limit, mode=mode)
 
 
-async def get_user_history_data(user_id: int, limit: int = 10, mode: str | None = None):
+async def get_user_history_data(user_id: int, limit: int = 10, mode: Optional[str] = None):
     query = """
         SELECT id, created_at, mode, result, score, rank_change, opponent_name, player_color
         FROM game_history

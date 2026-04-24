@@ -1,6 +1,6 @@
 import os
 import uuid
-from typing import Tuple
+from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException
 
 # Subimos un nivel en los directorios para apuntar a backend/uploads/avatars
@@ -21,7 +21,7 @@ def save_user_avatar_file(user_id: int, file: UploadFile) -> Tuple[str, str]:
     return file_path, public_path
 
 
-def delete_avatar_file(avatar_url: str | None) -> None:
+def delete_avatar_file(avatar_url: Optional[str]) -> None:
     """Borra el fichero de avatar del disco si es un upload local."""
     if not avatar_url or "/uploads/avatars/" not in avatar_url:
         return
@@ -32,4 +32,4 @@ def delete_avatar_file(avatar_url: str | None) -> None:
     try:
         os.remove(file_path)
     except FileNotFoundError:
-        pass  # Ya no existía, no es un error
+        pass  # Ya no existía, no es un error
