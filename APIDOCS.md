@@ -272,7 +272,8 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
     "win_streak": 1,
     "first_place": 2,
     "second_place": 1,
-    "third_place": 1
+    "third_place": 1,
+    "fourth_place": 1
   }
 }
 ```
@@ -305,10 +306,9 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 {
   "opponent_name": "RivalX",
   "result": "Ganada | Perdida | Empate | 1º | 2º...",
-  "score": 40,
-  "rankChange": 15,
-  "duration_seconds": 120,
-  "game_mode": "1vs1",
+  "score": "40",
+  "rankChange": "15",
+  "mode": "1vs1",
   "player_color": "black"
 }
 ```
@@ -321,8 +321,8 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
   "opponent_name": "RivalX",
   "mode": "1vs1",
   "result": "Ganada",
-  "score": 40,
-  "rankChange": 15,
+  "score": "40",
+  "rankChange": "15",
   "player_color": "black"
 }
 ```
@@ -436,9 +436,11 @@ El campo `status` de cada amigo se calcula en backend usando la conexión activa
 **Respuesta (200):**
 ```json
 {
-  "message": "Solicitud aceptada/rechazada/eliminada"
+  "message": "Solicitud aceptada"
 }
 ```
+
+> En `reject` y `DELETE` la respuesta real es `{"message": "Solicitud/Amigo eliminado"}`.
 
 ---
 
@@ -566,7 +568,7 @@ El campo `status` de cada amigo se calcula en backend usando la conexión activa
 **Body requerido:**
 ```json
 {
-  "mode": "1vs1" | "1vs1vs1vs1" | "vs_ai" | "1vs1_skills" | "1vs1vs1vs1_skills" | "vs_ai_skills"
+  "mode": "1vs1" | "1v1" | "1vs1vs1vs1" | "1v1v1v1" | "vs_ai" | "1vs1_skills" | "1v1_skills" | "1vs1vs1vs1_skills" | "1v1v1v1_skills" | "vs_ai_skills"
 }
 ```
 
@@ -619,6 +621,8 @@ El campo `status` de cada amigo se calcula en backend usando la conexión activa
 
 #### 🔵 POST `/api/games/invite`
 **Crea lobby privado e inyecta push ws al amigo para invitarlo de inmediato.**
+
+**Número esperado de invitaciones:** 1 para `1vs1`/`1v1`, 3 para `1vs1vs1vs1`/`1v1v1v1`.
 
 **Body requerido:**
 ```json
@@ -717,11 +721,13 @@ El campo `status` de cada amigo se calcula en backend usando la conexión activa
 #### 🟢 GET `/api/games/{game_id}/state`
 **Obtener información pre-match sobre los miembros, si aceptaron y su estado 'Listo'.**
 
+> Este endpoint reporta `status` como `waiting` o `playing`; cuando la partida ya terminó, la implementación actual normaliza el estado a `playing` mientras la sala sigue viva en memoria.
+
 **Respuesta (200):**
 ```json
 {
   "game_id": "124",
-  "status": "waiting | playing | finished",
+  "status": "waiting | playing",
   "mode": "1vs1",
   "players": [
      {
@@ -784,4 +790,4 @@ Como los `WebSockets` estándar no envían cabeceras de autorización custom fá
   - Al detectar `game_over: true`, el servidor programa la **limpieza automática** de la sala en memoria tras 5 segundos.
 - `{"type": "chat_message", "payload": {"sender": "User", "message": "..."}}`: Nuevo mensaje de chat recibido.
 - `{"type": "error", "payload": {"message": "..."}}`: Notificación de error (movimiento inválido, etc).
-- `{"type": "invite_response", "payload": {"action": "room_closed|left|kicked", ...}}`: Notificación de cierre de sala o expulsión.
+- `{"type": "invite_response", "payload": {"action": "accepted|rejected|room_closed|left|kicked", ...}}`: Notificación de respuesta a invitación o cierre de sala.

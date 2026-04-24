@@ -5,17 +5,17 @@
 | ID | Nombre | Descripción | Tipo |
 |---|---|---|---|
 | gravity | Gravedad | Desplaza fichas en dirección elegida | Ofensivo |
-| bomb | Bomba 3x3 | Voltea fichas en área 3x3 | Ofensivo |
-| fix_piece | Ficha Fija | Coloca ficha permanente e inmune | Defensivo |
-| unfix_piece | Quitar Ficha Fija | Elimina ficha fija | Herramienta |
-| place_free | Ficha Libre | Coloca ficha sin captura | Ofensivo |
-| skip_rival | Saltar Turno | Omite turno siguiente | Control |
-| lose_turn | Perder Turno | Usuario pierde siguiente turno | Negativo |
-| flip_rival | Voltear Ficha | Convierte ficha rival | Ofensivo |
-| swap_colors | Intercambio Color | Intercambia colores | Control |
-| steal_skill | Robar Habilidad | Roba skill aleatoria | Robo |
-| exchange_skill | Intercambiar Skill | Intercambia skill | Intercambio |
-| give_skill | Dar Habilidad | Regala skill voluntariamente | Cooperativo |
+| ✔️ bomb | Bomba 3x3 | Voltea fichas en área 3x3 | Ofensivo |
+| ✔️ fix_piece | Ficha Fija | Coloca ficha permanente e inmune | Defensivo |
+| ✔️ unfix_piece | Quitar Ficha Fija | Elimina ficha fija | Herramienta |
+| ✔️ place_free | Ficha Libre | Coloca ficha sin captura | Ofensivo |
+| ✔️ skip_rival | Saltar Turno | Omite turno siguiente | Control |
+| ✔️ lose_turn | Perder Turno | Usuario pierde siguiente turno | Negativo |
+| ✔️ flip_rival | Voltear Ficha | Convierte ficha rival | Ofensivo |
+| ✔️ swap_colors | Intercambio Color | Intercambia colores | Control |
+| ✔️ steal_skill | Robar Habilidad | Roba skill aleatoria | Robo |
+| ✔️ exchange_skill | Intercambiar Skill | Intercambia skill | Intercambio |
+| ✔️ give_skill | Dar Habilidad | Regala skill voluntariamente | Cooperativo |
 
 ---
 
