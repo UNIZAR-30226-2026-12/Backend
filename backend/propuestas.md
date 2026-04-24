@@ -65,3 +65,12 @@ La mejora técnica: Implementar un sistema de Ping/Pong en ws/manager.py. El ser
 ---------
 
 
+⚠️ Un "Pero" global que debemos apuntar para el futuro
+Aunque place_free está perfecta, revisando cómo funciona me he dado cuenta de un detalle importante a nivel global (del motor del juego) que afectará a casi todas las habilidades, especialmente a esta. Te lo dejo apuntado para que lo tengamos en mente, no hace falta que lo arreglemos hoy:
+
+El problema del salto de turno automático: En el Reversi clásico, si te toca jugar pero no tienes ningún movimiento válido que voltee fichas, pierdes el turno automáticamente.
+
+Si tu sistema (en resolve_game_state o _next_piece_with_moves_4p) salta automáticamente a un jugador cuando tiene 0 movimientos válidos, le estás quitando la oportunidad de usar sus habilidades. Imagina que un jugador está bloqueado, pero tiene un place_free o una bomb en el inventario; debería poder usar su turno para lanzar la habilidad y salvarse, en lugar de que el juego le salte el turno instantáneamente.
+
+
+---------
