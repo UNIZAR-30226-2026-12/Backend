@@ -402,24 +402,28 @@ class GameManager:
 
         elif skill_type == "place_free":
             r, c = skill_data.get("row"), skill_data.get("col")
+            if r is None or c is None: return False, "Coordenadas faltantes"
             if game["board"][r][c] is not None: return False, "Casilla ocupada"
             game["board"] = apply_free_place(game["board"], r, c, player)
-            success, msg = True, "Ficha libre colocada"
+            obtained_skill = self._handle_landing_on_skill_tile(game, player, r, c)
+            success = True
+            msg = "Ficha libre colocada"
+            if obtained_skill:
+                msg += f". Has obtenido la habilidad: {obtained_skill}"
 
         elif skill_type == "skip_rival":
             mode = game.get("mode", "")
-            rival = None
             if _is_1v1(mode):
-                rival = "white" if player == "black" else "black"
-            else:
-                turn_order = game["turn_order"]
-                active = game["active_pieces"]
-                idx = turn_order.index(player)
-                for step in range(1, 4):
-                    p_candidate = turn_order[(idx + step) % 4]
-                    if p_candidate in active:
-                        rival = p_candidate
-                        break
+                return False, "Esta habilidad solo se usa en modo 4 jugadores"
+            rival = None
+            turn_order = game["turn_order"]
+            active = game["active_pieces"]
+            idx = turn_order.index(player)
+            for step in range(1, 4):
+                p_candidate = turn_order[(idx + step) % 4]
+                if p_candidate in active:
+                    rival = p_candidate
+                    break
             if rival:
                 game["skip_next_turn"][rival] = True
                 success, msg = True, f"Turno de {rival} saltado"
@@ -430,20 +434,21 @@ class GameManager:
 
         elif skill_type == "flip_rival":
             r, c = skill_data.get("row"), skill_data.get("col")
+            if r is None or c is None: return False, "Coordenadas faltantes"
             if game["board"][r][c] is None or game["board"][r][c] == player: return False, "Casilla no valida"
             game["board"] = apply_flip_rival(game["board"], r, c, player, fixed_set)
             success, msg = True, "Ficha rival volteada"
 
         elif skill_type == "swap_colors":
             target = skill_data.get("target_player")
-            if not target or target == player: return False, "Objetivo no valido"
+            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
             game["board"] = swap_player_colors(game["board"], player, target, fixed_set)
             success, msg = True, f"Colores intercambiados con {target}"
 
         elif skill_type == "steal_skill":
             target = skill_data.get("target_player")
-            if not target or target == player: return False, "Objetivo no valido"
-            target_inv = game["skills_inventory"].get(target, [])
+            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
+            target_inv = game["skills_inventory"][target]
             if not target_inv: return False, "El rival no tiene habilidades"
             skill = target_inv.pop(random.randint(0, len(target_inv)-1))
             game["skills_inventory"][player].append(skill)
@@ -451,64 +456,43 @@ class GameManager:
 
         elif skill_type == "exchange_skill":
             target = skill_data.get("target_player")
-            if not target or target == player: return False, "Objetivo no valido"
-            target_inv = game["skills_inventory"].get(target, [])
-            player_inv = game["skills_inventory"][player]
+            given_index = skill_data.get("given_skill_index")
+            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
+            if len(inventory) <= 2: return False, "No tienes otra habilidad para intercambiar"
+            if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a dar no valida"
+            
+            target_inv = game["skills_inventory"][target]
             
             if not target_inv: return False, "El rival no tiene habilidades"
             
-            # Buscamos candidatos que no sean la propia habilidad exchange_skill que estamos usando
-            candidates = [i for i, s in enumerate(player_inv) if i != inventory_index]
-            if not candidates:
-                return False, "No tienes otra habilidad para intercambiar"
-                
-            idx_p = random.choice(candidates)
             idx_t = random.randint(0, len(target_inv)-1)
             
             # Guardamos para el mensaje
-            s_p = player_inv[idx_p]
+            s_p = player_inv[given_index]
             s_t = target_inv[idx_t]
             
             # Intercambiamos sin usar pop todavia para no alterar indices
-            player_inv[idx_p] = s_t
+            player_inv[given_index] = s_t
             target_inv[idx_t] = s_p
             
             success, msg = True, f"Intercambiada {s_p} por {s_t} con {target}"
 
         elif skill_type == "give_skill":
             target = skill_data.get("target_player")
-            if not target or target == player: return False, "Objetivo no valido"
+            given_index = skill_data.get("given_skill_index")
+            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
+            if len(inventory) <= 2: return False, "No tienes otra habilidad para regalar"
+            if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a regalar no valida"
+
+            skill_to_gift = game["skills_inventory"][player]
             
-            # El inventario actual incluye la propia habilidad 'give_skill' que se esta usando
-            player_inv = game["skills_inventory"][player]
+            inventory.pop(given_index) 
             
-            # Buscamos habilidades candidatas (que no sean la que estamos usando para regalar)
-            # Nota: si tiene dos 'give_skill', podria regalar una.
-            candidates = [s for i, s in enumerate(player_inv) if i != inventory_index]
-            
-            if not candidates:
-                return False, "No tienes otra habilidad para regalar"
-            
-            # Elegimos una de las candidatas para regalar
-            skill_to_gift = random.choice(candidates)
-            
-            # La quitamos del inventario del jugador (buscando por indice para evitar problemas si hay duplicadas)
-            gifted_idx = -1
-            for i, s in enumerate(player_inv):
-                if i != inventory_index and s == skill_to_gift:
-                    gifted_idx = i
-                    break
-            
-            if gifted_idx != -1:
-                player_inv.pop(gifted_idx)
-                # AJUSTE DE INDICE: Si el que regalamos estaba antes en la lista, el nuestro baja una posicion
-                if gifted_idx < inventory_index:
-                    inventory_index -= 1
-                    
-                game["skills_inventory"][target].append(skill_to_gift)
-                success, msg = True, f"Has regalado la habilidad {skill_to_gift} a {target}"
-            else:
-                return False, "Error al procesar el regalo"
+            if given_index < inventory_index:
+                inventory_index -= 1
+                
+            game["skills_inventory"][target].append(skill_to_gift)
+            success, msg = True, f"Has regalado la habilidad {skill_to_gift} a {target}"
 
         if success:
             inventory.pop(inventory_index) # Consumo final por indice
