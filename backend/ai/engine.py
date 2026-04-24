@@ -224,9 +224,16 @@ def get_ai_skill_action(game_state: dict, ai_player: str) -> Optional[dict]:
                 action_payload["col"] = tc
                 return action_payload
 
-        elif skill in ("swap_colors", "steal_skill", "exchange_skill"):
+        elif skill == "swap_colors":
             if rivals:
                 action_payload["target_player"] = random.choice(rivals)
+                return action_payload
+
+        elif skill in ("steal_skill", "exchange_skill"):
+            skill_inv = game_state.get("skills_inventory", {})
+            eligible_rivals = [r for r in rivals if skill_inv.get(r)]
+            if eligible_rivals:
+                action_payload["target_player"] = random.choice(eligible_rivals)
                 return action_payload
 
         elif skill == "give_skill":

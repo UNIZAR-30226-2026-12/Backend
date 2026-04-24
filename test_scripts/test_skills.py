@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 BASE_URL = "http://localhost:8081"
 WS_URL   = "ws://localhost:8081"
 
+HTTP = requests.Session()
+HTTP.trust_env = False
+
 # ─────────────────────────────────────────────
 #  UTILIDADES
 # ─────────────────────────────────────────────
@@ -28,19 +31,19 @@ def debug(msg): print(f"         · DEBUG: {msg}")
 
 def create_and_login(username, password="password123"):
     email = f"{username}@test.com"
-    requests.post(f"{BASE_URL}/api/auth/register", json={"username": username, "email": email, "password": password})
-    res_login = requests.post(f"{BASE_URL}/api/auth/login", data={"username": email, "password": password})
+    HTTP.post(f"{BASE_URL}/api/auth/register", json={"username": username, "email": email, "password": password})
+    res_login = HTTP.post(f"{BASE_URL}/api/auth/login", data={"username": email, "password": password})
     return res_login.json()["access_token"]
 
 def create_game_and_join(creator_token, guest_tokens, mode="1v1_skills"):
-    res = requests.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {creator_token}"}, json={"mode": mode})
+    res = HTTP.post(f"{BASE_URL}/api/games/create", headers={"Authorization": f"Bearer {creator_token}"}, json={"mode": mode})
     game_id = res.json()["game_id"]
     for t in guest_tokens:
-        requests.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t}"})
+        HTTP.post(f"{BASE_URL}/api/games/join/{game_id}", headers={"Authorization": f"Bearer {t}"})
     return game_id
 
 def delete_user(token, username):
-    requests.delete(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {token}"})
+    HTTP.delete(f"{BASE_URL}/api/users/me", headers={"Authorization": f"Bearer {token}"})
 
 async def safe_recv(ws, timeout=3.0):
     try:
@@ -398,7 +401,7 @@ async def run_fixed_pieces_test():
             # ══════════════════════════════════════════
             # SUB-TEST 3d: unfix_piece castigo (tablero SIN fichas fijas temporalmente)
             # ══════════════════════════════════════════
-            step(5, "[3d] Castigo de unfix_piece: se usa sin haber fichas fijas en tablero...")
+            step(5, "[3d] unfix_piece invalido: debe rechazar sin consumir habilidad...")
             test_board2 = [[None]*8 for _ in range(8)]
             test_board2[3][3] = "white"
             test_board2[3][4] = "black"
@@ -428,7 +431,7 @@ async def run_fixed_pieces_test():
                         break
 
             assert state_clean is not None, "No se recibió el estado limpio con unfix_piece"
-            ok("Tablero sin fichas fijas listo. Usando unfix_piece como castigo...")
+            ok("Tablero sin fichas fijas listo. Verificando rechazo controlado...")
 
             await ws1.send(json.dumps({
                 "action": "use_skill",
@@ -436,19 +439,35 @@ async def run_fixed_pieces_test():
                 "row": 0, "col": 0
             }))
 
-            state_after_unfix = None
+            err_unfix = None
             for _ in range(15):
                 msg = await safe_recv(ws1, timeout=1.0)
-                if msg and msg.get("type") == "game_state_update":
-                    payload = msg.get("payload", {})
-                    inv_after = payload.get("skills_inventory", {}).get("black", [])
-                    if "unfix_piece" not in inv_after and payload.get("current_player") == "white":
-                        state_after_unfix = msg
-                        break
+                if msg and msg.get("type") == "error":
+                    err_unfix = msg
+                    break
 
-            assert state_after_unfix is not None, \
-                "El castigo de unfix_piece no se aplicó: el turno no pasó a blancas o la habilidad no se consumió"
-            ok("Castigo aplicado: habilidad consumida y turno cedido al rival.")
+            assert err_unfix is not None, "No se recibió error al usar unfix_piece sin fichas fijas"
+            assert "No es una ficha fija" in err_unfix.get("payload", {}).get("message", ""), \
+                f"Mensaje de error inesperado: {err_unfix}"
+
+            # Reintentar confirma que la habilidad NO se consumió (si se hubiese consumido: 'No tienes esa habilidad')
+            await ws1.send(json.dumps({
+                "action": "use_skill",
+                "type": "unfix_piece",
+                "row": 0, "col": 0
+            }))
+
+            err_unfix_retry = None
+            for _ in range(15):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "error":
+                    err_unfix_retry = msg
+                    break
+
+            assert err_unfix_retry is not None, "No se recibió error en el reintento de unfix_piece"
+            assert "No es una ficha fija" in err_unfix_retry.get("payload", {}).get("message", ""), \
+                f"La habilidad parece haberse consumido indebidamente: {err_unfix_retry}"
+            ok("Rechazo correcto: unfix_piece invalido no se consume y mantiene consistencia.")
 
             # ══════════════════════════════════════════
             # SUB-TEST 3b: flip_rival sobre ficha fija
@@ -894,7 +913,7 @@ async def run_bomb_vs_ai_test():
     try:
         step(1, f"Creando partida vs_ai_skills para {u1}...")
         t1 = create_and_login(u1)
-        res = requests.post(
+        res = HTTP.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
             json={"mode": "vs_ai_skills"}
@@ -1003,7 +1022,7 @@ async def run_fix_piece_vs_ai_test():
     try:
         step(1, f"Creando partida vs_ai_skills para {u1}...")
         t1 = create_and_login(u1)
-        res = requests.post(
+        res = HTTP.post(
             f"{BASE_URL}/api/games/create",
             headers={"Authorization": f"Bearer {t1}"},
             json={"mode": "vs_ai_skills"}
@@ -1088,6 +1107,161 @@ async def run_fix_piece_vs_ai_test():
 
 
 # ─────────────────────────────────────────────
+#  BLOQUE 7: IA ignora skill invalida (vs_ai)
+# ─────────────────────────────────────────────
+
+async def run_ai_invalid_skill_fallback_vs_ai_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 7: IA ignora skill invalida y mueve normal (vs_ai)")
+    print("="*60)
+
+    u1 = f"ais1_{uuid.uuid4().hex[:4]}"
+    t1 = None
+
+    try:
+        step(1, f"Creando partida vs_ai_skills para {u1}...")
+        t1 = create_and_login(u1)
+        res = HTTP.post(
+            f"{BASE_URL}/api/games/create",
+            headers={"Authorization": f"Bearer {t1}"},
+            json={"mode": "vs_ai_skills"}
+        )
+        game_id = res.json()["game_id"]
+        ok(f"Partida vs_ai_skills creada: {game_id}")
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1:
+            for _ in range(6):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    break
+
+            step(2, "Forzando turno de IA con skill invalida (steal_skill sin inventario rival)...")
+            board = [[None]*8 for _ in range(8)]
+            board[3][3] = "white"
+            board[3][4] = "black"
+            board[4][3] = "black"
+            board[4][4] = "white"
+
+            await ws1.send(json.dumps({
+                "action": "debug_force_state",
+                "board": board,
+                "current_player": "white",
+                "fixed_pieces": [],
+                "skills_inventory": {"black": [], "white": ["steal_skill"]}
+            }))
+
+            state_after_ai = None
+            for _ in range(20):
+                msg = await safe_recv(ws1, timeout=0.5)
+                if not msg or msg.get("type") != "game_state_update":
+                    continue
+                payload = msg.get("payload", {})
+                if payload.get("current_player") == "black" and payload.get("last_move"):
+                    state_after_ai = payload
+                    break
+
+            assert state_after_ai is not None, "La IA no hizo movimiento normal tras skill invalida"
+            assert "steal_skill" in state_after_ai.get("skills_inventory", {}).get("white", []), \
+                "La skill invalida no deberia consumirse"
+            ok("La IA ignora skill invalida y realiza movimiento normal en vs_ai.")
+
+        print("\n  ✔ BLOQUE 7 PASADO: fallback IA en vs_ai OK")
+        return True
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 7 FALLIDO: {e}")
+        return False
+    finally:
+        if t1: delete_user(t1, u1)
+
+
+# ─────────────────────────────────────────────
+#  BLOQUE 8: IA ignora skill invalida (4P)
+# ─────────────────────────────────────────────
+
+async def run_ai_invalid_skill_fallback_4p_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 8: IA ignora skill invalida y mueve normal (4P)")
+    print("="*60)
+
+    u1 = f"ais4_{uuid.uuid4().hex[:4]}"
+    t1 = None
+
+    try:
+        step(1, f"Creando partida 4P skills con bots para {u1}...")
+        t1 = create_and_login(u1)
+        res = HTTP.post(
+            f"{BASE_URL}/api/games/create",
+            headers={"Authorization": f"Bearer {t1}"},
+            json={"mode": "1v1v1v1_skills"}
+        )
+        game_id = res.json()["game_id"]
+
+        for _ in range(3):
+            rb = HTTP.post(
+                f"{BASE_URL}/api/games/{game_id}/add_bot",
+                headers={"Authorization": f"Bearer {t1}"}
+            )
+            assert rb.status_code == 200, f"No se pudo añadir bot: {rb.status_code} {rb.text}"
+
+        ok(f"Partida 4P skills creada y rellenada con bots: {game_id}")
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1:
+            latest_payload = None
+            for _ in range(20):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    latest_payload = msg.get("payload", {})
+                    if latest_payload.get("status") == "playing":
+                        break
+
+            assert latest_payload is not None, "No se recibio estado inicial 4P"
+            username_by_piece = latest_payload.get("username_by_piece", {})
+            ai_piece = next((p for p, u in username_by_piece.items() if isinstance(u, str) and u.startswith("IA_")), None)
+            assert ai_piece is not None, "No se detecto pieza IA en 4P"
+
+            step(2, f"Forzando turno IA ({ai_piece}) con steal_skill invalida...")
+            skills_inventory = {"black": [], "white": [], "red": [], "blue": []}
+            skills_inventory[ai_piece] = ["steal_skill"]
+
+            await ws1.send(json.dumps({
+                "action": "debug_force_state",
+                "board": latest_payload.get("board"),
+                "current_player": ai_piece,
+                "fixed_pieces": latest_payload.get("fixed_pieces", []),
+                "skills_inventory": skills_inventory
+            }))
+
+            state_after_ai = None
+            for _ in range(30):
+                msg = await safe_recv(ws1, timeout=0.5)
+                if not msg or msg.get("type") != "game_state_update":
+                    continue
+                payload = msg.get("payload", {})
+                if payload.get("current_player") != ai_piece and payload.get("last_move"):
+                    state_after_ai = payload
+                    break
+
+            assert state_after_ai is not None, "La IA 4P no hizo movimiento normal tras skill invalida"
+            assert "steal_skill" in state_after_ai.get("skills_inventory", {}).get(ai_piece, []), \
+                "La skill invalida no deberia consumirse en 4P"
+            ok("La IA ignora skill invalida y realiza movimiento normal en 4P.")
+
+        print("\n  ✔ BLOQUE 8 PASADO: fallback IA en 4P OK")
+        return True
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 8 FALLIDO: {e}")
+        return False
+    finally:
+        if t1: delete_user(t1, u1)
+
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -1099,6 +1273,8 @@ async def async_main():
     results["Bomba respeta ficha fija (radio)"]   = await run_bomb_respects_fixed_test()
     results["Bomba en modo vs_ai"]                = await run_bomb_vs_ai_test()
     results["fix_piece resiste turno IA (vs_ai)"] = await run_fix_piece_vs_ai_test()
+    results["IA fallback skill invalida (vs_ai)"] = await run_ai_invalid_skill_fallback_vs_ai_test()
+    results["IA fallback skill invalida (4P)"]    = await run_ai_invalid_skill_fallback_4p_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL SKILLS")

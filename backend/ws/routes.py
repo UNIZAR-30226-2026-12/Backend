@@ -168,9 +168,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         def check_and_trigger_ai(current_state):
             if not current_state or current_state.get("game_over"): return
 
-            c_player = current_state.get("current_player")
             g_mode = current_state.get("mode", "")
             base_g_mode = g_mode.replace("_skills", "")
+            c_player = current_state.get("current_player")
 
             is_1v1_ai = (base_g_mode == "vs_ai" and c_player == "white")
             u_name = current_state.get("username_by_piece", {}).get(c_player)
@@ -183,10 +183,23 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     if not current or current.get("game_over"): return
                     if current.get("paused_usernames"): return
 
+                    current_player = current.get("current_player")
+                    current_mode = current.get("mode", "")
+                    current_base_mode = current_mode.replace("_skills", "")
+                    is_1v1_ai_now = (current_base_mode == "vs_ai" and current_player == "white")
+                    current_username = current.get("username_by_piece", {}).get(current_player)
+                    is_4p_ai_now = (
+                        current_base_mode in ("1v1v1v1", "1vs1vs1vs1")
+                        and current_username
+                        and current_username.startswith("IA_")
+                    )
+                    if not (is_1v1_ai_now or is_4p_ai_now):
+                        return
+
                     # Intentar usar habilidad si la IA tiene en inventario
-                    ai_skill_action = get_ai_skill_action(current, c_player)
+                    ai_skill_action = get_ai_skill_action(current, current_player)
                     if ai_skill_action:
-                        skill_success, _ = await game_manager.use_skill(game_id, c_player, ai_skill_action)
+                        skill_success, _ = await game_manager.use_skill(game_id, current_player, ai_skill_action)
                         if skill_success:
                             ais = game_manager.get_game_state(game_id)
                             if ais and ais.get("game_over"):
@@ -198,15 +211,20 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
 
                     # Sin habilidades usables: movimiento normal
                     fixed_set_ai = {tuple(p) for p in current.get("fixed_pieces", [])}
-                    if is_4p_ai:
-                        ai_move = await asyncio.to_thread(get_best_ai_move_4p, current["board"], c_player, fixed_set_ai)
+                    if is_4p_ai_now:
+                        ai_move = await asyncio.to_thread(get_best_ai_move_4p, current["board"], current_player, fixed_set_ai)
                         r, c = (ai_move["row"], ai_move["col"]) if ai_move else (None, None)
                     else:
-                        ai_move = await asyncio.to_thread(get_best_ai_move, current["board"], c_player, fixed_set_ai)
+                        ai_move = await asyncio.to_thread(get_best_ai_move, current["board"], current_player, fixed_set_ai)
                         r, c = (ai_move.row, ai_move.col) if ai_move else (None, None)
 
+                    if (r is None or c is None) and current.get("valid_moves"):
+                        fallback_move = current.get("valid_moves", [])[0]
+                        r = fallback_move.get("row")
+                        c = fallback_move.get("col")
+
                     if r is not None and c is not None:
-                        ai_success, _ = await game_manager.make_move(game_id, c_player, r, c)
+                        ai_success, _ = await game_manager.make_move(game_id, current_player, r, c)
                         if ai_success:
                             ais = game_manager.get_game_state(game_id)
                             if ais and ais.get("game_over"):
