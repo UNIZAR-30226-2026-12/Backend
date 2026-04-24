@@ -331,7 +331,14 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 
 #### 🟢 GET `/api/users/me/history`
 *(Lo mismo aplica a **GET** `/api/users/{user_id}/history`)*
-**Obtiene una lista de objetos GameHistoryResponse con los últimos 10 juegos.**
+**Obtiene una lista de objetos GameHistoryResponse ordenada por `created_at DESC`.**
+
+**Query params opcionales:**
+- `limit`: cantidad de registros a devolver. Valor por defecto: `10`. Máximo: `100`.
+- `mode`: filtra por modo si se necesita una vista específica (`1vs1`, `1vs1vs1vs1`, `vs_ai`, y sus variantes compatibles).
+
+> [!TIP]
+> Para el preview de la sala de espera conviene pedir solo las partidas más recientes con `limit=5` y no filtrar por modo en cliente.
 
 **Respuesta (200):**
 ```json
@@ -368,6 +375,8 @@ El servidor actualiza automáticamente el `peak_elo` utilizando la función `GRE
 
 #### 🟢 GET `/api/friends`
 **Panel principal social: Tus amigos offline/online, solicitudes entrantes y retos (invitaciones a salas).**
+
+El campo `status` de cada amigo se calcula en backend usando la conexión activa al canal de notificaciones (`/ws/notifications`) y, si existe, también la conexión de partida (`/ws/play/{game_id}`).
 
 **Respuesta (200):**
 ```json
@@ -741,6 +750,7 @@ Como los `WebSockets` estándar no envían cabeceras de autorización custom fá
 
 ### A. Canal de Notificaciones Globales
 `ws://host:port/ws/notifications?token={tu_token}`
+- Este canal mantiene la presencia online del usuario mientras navega por la app.
 - `duel_invite`: Tu amigo creó un lobby con `/api/games/invite` y te toca a ti.
 - `invite_response`: Tu amigo ya respondió.
 
