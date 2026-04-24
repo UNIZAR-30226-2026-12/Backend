@@ -77,9 +77,14 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     game_invites_rows = await database.fetch_all(query=query_game_invites, values={"uid": current_user["id"]})
 
     paused_games = []
+    paused_modes_supported = {
+        "1v1", "1vs1", "1v1_skills", "1vs1_skills",
+        "1v1v1v1", "1vs1vs1vs1", "1v1v1v1_skills", "1vs1vs1vs1_skills",
+    }
     current_username = current_user["username"]
     for game_id, game in game_manager.active_games.items():
-        if game.get("mode") not in ("1v1", "1v1v1v1"):
+        mode = (game.get("mode") or "").lower()
+        if mode not in paused_modes_supported:
             continue
         if not game.get("is_private"):
             continue
@@ -92,7 +97,9 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
         if current_username not in paused_usernames:
             continue
 
-        if game.get("mode") == "1v1v1v1":
+        is_four_player = mode.replace("_skills", "") in ("1v1v1v1", "1vs1vs1vs1")
+
+        if is_four_player:
             username_by_piece = game.get("username_by_piece", {})
             active_usernames = [
                 username_by_piece.get(piece)
@@ -108,7 +115,7 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
 
         paused_games.append({
             "game_id": int(game_id),
-            "mode": "1vs1vs1vs1" if game.get("mode") == "1v1v1v1" else "1vs1",
+            "mode": "1vs1vs1vs1_skills" if mode in ("1v1v1v1_skills", "1vs1vs1vs1_skills") else ("1vs1vs1vs1" if is_four_player else ("1vs1_skills" if mode in ("1v1_skills", "1vs1_skills") else "1vs1")),
             "participants": participants,
             "paused_by": paused_usernames,
             "active_players": active_usernames,

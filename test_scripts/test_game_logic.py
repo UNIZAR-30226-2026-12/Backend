@@ -906,6 +906,178 @@ async def run_pause_mechanic_test():
         delete_user(t1, u1)
         delete_user(t2, u2)
 
+
+# ─────────────────────────────────────────────
+#  BLOQUE 11: LISTA DE PAUSADAS (MODOS SKILLS)
+# ─────────────────────────────────────────────
+
+async def run_pause_list_skills_modes_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 11: LISTA DE PAUSADAS EN MODOS SKILLS")
+    print("="*60)
+
+    host = f"phs_{uuid.uuid4().hex[:4]}"
+    g1 = f"pg1_{uuid.uuid4().hex[:4]}"
+    g2 = f"pg2_{uuid.uuid4().hex[:4]}"
+    g3 = f"pg3_{uuid.uuid4().hex[:4]}"
+
+    th = tg1 = tg2 = tg3 = None
+
+    try:
+        step(1, "Creando 4 usuarios y estableciendo amistad con el host...")
+        th = create_and_login(host)
+        tg1 = create_and_login(g1)
+        tg2 = create_and_login(g2)
+        tg3 = create_and_login(g3)
+
+        hid = get_user_id(th)
+        g1id = get_user_id(tg1)
+        g2id = get_user_id(tg2)
+        g3id = get_user_id(tg3)
+
+        for guest_name, guest_token in ((g1, tg1), (g2, tg2), (g3, tg3)):
+            requests.post(
+                f"{BASE_URL}/api/friends/request",
+                headers={"Authorization": f"Bearer {th}"},
+                json={"username": guest_name}
+            )
+            requests.post(
+                f"{BASE_URL}/api/friends/{hid}/accept",
+                headers={"Authorization": f"Bearer {guest_token}"}
+            )
+        ok("Amistades host ↔ invitados configuradas")
+
+        step(2, "Creando partida privada 1v1_skills, pausando y verificando /api/friends...")
+        r_inv_1v1 = requests.post(
+            f"{BASE_URL}/api/games/invite",
+            headers={"Authorization": f"Bearer {th}"},
+            json={"friend_ids": [g1id], "mode": "1v1_skills"}
+        )
+        assert r_inv_1v1.status_code == 200, f"Invite 1v1_skills fallido: {r_inv_1v1.status_code} {r_inv_1v1.text}"
+        game_id_1v1 = r_inv_1v1.json()["game_id"]
+
+        r_acc_1v1 = requests.post(
+            f"{BASE_URL}/api/games/{game_id_1v1}/accept",
+            headers={"Authorization": f"Bearer {tg1}"}
+        )
+        assert r_acc_1v1.status_code == 200, f"Accept 1v1_skills fallido: {r_acc_1v1.status_code} {r_acc_1v1.text}"
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id_1v1}?token={th}") as ws_h, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id_1v1}?token={tg1}") as ws_g:
+            playing_seen = False
+            for _ in range(3):
+                mh = await safe_recv(ws_h, timeout=1.0)
+                mg = await safe_recv(ws_g, timeout=1.0)
+                if mh and mh.get("type") == "game_state_update" and mh.get("payload", {}).get("status") == "playing":
+                    playing_seen = True
+                if mg and mg.get("type") == "game_state_update" and mg.get("payload", {}).get("status") == "playing":
+                    playing_seen = True
+            await asyncio.sleep(0.6); await ws_h.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws_g.send(json.dumps({"action": "set_ready", "ready": True}))
+
+            for _ in range(10):
+                m = await safe_recv(ws_h, timeout=1.0)
+                if m and m.get("type") == "game_state_update" and m.get("payload", {}).get("status") == "playing":
+                    playing_seen = True
+                    break
+            assert playing_seen, "La partida 1v1_skills no llego a playing"
+
+            await asyncio.sleep(0.6); await ws_h.send(json.dumps({"action": "pause"}))
+            pause_seen = False
+            for _ in range(10):
+                m = await safe_recv(ws_h, timeout=1.0)
+                if m and m.get("type") == "game_state_update" and host in m.get("payload", {}).get("paused_usernames", []):
+                    pause_seen = True
+                    break
+            assert pause_seen, "No se aplico pausa en 1v1_skills"
+
+        friends_1v1 = requests.get(
+            f"{BASE_URL}/api/friends",
+            headers={"Authorization": f"Bearer {th}"}
+        )
+        assert friends_1v1.status_code == 200, f"GET /api/friends fallido: {friends_1v1.status_code}"
+        paused_1v1 = friends_1v1.json().get("pausedGames", [])
+        match_1v1 = next((g for g in paused_1v1 if int(g.get("game_id", -1)) == int(game_id_1v1)), None)
+        assert match_1v1 is not None, "La partida 1v1_skills pausada no aparece en pausedGames"
+        assert match_1v1.get("mode") == "1vs1_skills", f"Modo esperado 1vs1_skills, recibido {match_1v1.get('mode')}"
+        ok("La lista pausedGames incluye correctamente 1v1_skills")
+
+        step(3, "Creando partida privada 1v1v1v1_skills, pausando y verificando /api/friends...")
+        r_inv_4p = requests.post(
+            f"{BASE_URL}/api/games/invite",
+            headers={"Authorization": f"Bearer {th}"},
+            json={"friend_ids": [g1id, g2id, g3id], "mode": "1v1v1v1_skills"}
+        )
+        assert r_inv_4p.status_code == 200, f"Invite 4P skills fallido: {r_inv_4p.status_code} {r_inv_4p.text}"
+        game_id_4p = r_inv_4p.json()["game_id"]
+
+        for guest_token in (tg1, tg2, tg3):
+            r_acc = requests.post(
+                f"{BASE_URL}/api/games/{game_id_4p}/accept",
+                headers={"Authorization": f"Bearer {guest_token}"}
+            )
+            assert r_acc.status_code == 200, f"Accept 4P skills fallido: {r_acc.status_code} {r_acc.text}"
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id_4p}?token={th}") as ws_h, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id_4p}?token={tg1}") as ws_1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id_4p}?token={tg2}") as ws_2, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id_4p}?token={tg3}") as ws_3:
+            playing_seen = False
+            for _ in range(3):
+                m_h = await safe_recv(ws_h, timeout=1.0)
+                m_1 = await safe_recv(ws_1, timeout=1.0)
+                m_2 = await safe_recv(ws_2, timeout=1.0)
+                m_3 = await safe_recv(ws_3, timeout=1.0)
+                for m in (m_h, m_1, m_2, m_3):
+                    if m and m.get("type") == "game_state_update" and m.get("payload", {}).get("status") == "playing":
+                        playing_seen = True
+
+            await asyncio.sleep(0.6); await ws_h.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws_1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws_2.send(json.dumps({"action": "set_ready", "ready": True}))
+            await asyncio.sleep(0.6); await ws_3.send(json.dumps({"action": "set_ready", "ready": True}))
+
+            for _ in range(15):
+                m = await safe_recv(ws_h, timeout=1.0)
+                if m and m.get("type") == "game_state_update" and m.get("payload", {}).get("status") == "playing":
+                    playing_seen = True
+                    break
+            assert playing_seen, "La partida 4P skills no llego a playing"
+
+            await asyncio.sleep(0.6); await ws_h.send(json.dumps({"action": "pause"}))
+            pause_seen = False
+            for _ in range(15):
+                m = await safe_recv(ws_h, timeout=1.0)
+                if m and m.get("type") == "game_state_update" and host in m.get("payload", {}).get("paused_usernames", []):
+                    pause_seen = True
+                    break
+            assert pause_seen, "No se aplico pausa en 4P skills"
+
+        friends_4p = requests.get(
+            f"{BASE_URL}/api/friends",
+            headers={"Authorization": f"Bearer {th}"}
+        )
+        assert friends_4p.status_code == 200, f"GET /api/friends fallido: {friends_4p.status_code}"
+        paused_4p = friends_4p.json().get("pausedGames", [])
+        match_4p = next((g for g in paused_4p if int(g.get("game_id", -1)) == int(game_id_4p)), None)
+        assert match_4p is not None, "La partida 4P skills pausada no aparece en pausedGames"
+        assert match_4p.get("mode") == "1vs1vs1vs1_skills", f"Modo esperado 1vs1vs1vs1_skills, recibido {match_4p.get('mode')}"
+        ok("La lista pausedGames incluye correctamente 1v1v1v1_skills")
+
+        print("\n  ✔ BLOQUE 11 PASADO: pausedGames cubre modos skills")
+        return True
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 11 FALLIDO: {e}")
+        return False
+    finally:
+        if th: delete_user(th, host)
+        if tg1: delete_user(tg1, g1)
+        if tg2: delete_user(tg2, g2)
+        if tg3: delete_user(tg3, g3)
+
 # ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
@@ -923,6 +1095,7 @@ async def async_main():
     results["Bloqueo de doble conexion WS"]               = await run_double_connection_test()
     results["Anti-spam WS"]                               = await run_rate_limiting_test()
     results["Mecanica de Pausa en Partida"]               = await run_pause_mechanic_test()
+    results["PausedGames en modos skills"]                = await run_pause_list_skills_modes_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL")
