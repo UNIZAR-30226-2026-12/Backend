@@ -4,6 +4,7 @@ from auth.dependencies import get_current_user
 from friends.schemas import FriendRequest, ChatMessageCreate
 from game.manager import game_manager
 from ws.manager import manager as ws_manager
+from ws.notifications import notifier
 
 router = APIRouter()
 
@@ -118,7 +119,7 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     for row in friends_rows:
         friend_data = dict(row)
         friend_username = friend_data.get("name", "")
-        if friend_username in ws_manager.active_users:
+        if friend_username in ws_manager.active_users or friend_username in notifier.active_users:
             friend_data["status"] = "online"
             online_friends.append(friend_data)
         else:

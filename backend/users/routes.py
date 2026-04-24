@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List
 from collections import Counter
 from persistence.database import database
@@ -440,24 +440,44 @@ async def create_my_history_entry(
 
 
 @router.get("/me/history", response_model=List[GameHistoryResponse])
-async def get_my_history(current_user: dict = Depends(get_current_user)):
-    return await get_user_history_data(current_user["id"])
+async def get_my_history(
+    current_user: dict = Depends(get_current_user),
+    limit: int = Query(10, ge=1, le=100),
+    mode: str | None = Query(default=None),
+):
+    return await get_user_history_data(current_user["id"], limit=limit, mode=mode)
 
 
 @router.get("/{user_id}/history", response_model=List[GameHistoryResponse])
-async def get_user_history(user_id: int):
-    return await get_user_history_data(user_id)
+async def get_user_history(
+    user_id: int,
+    limit: int = Query(10, ge=1, le=100),
+    mode: str | None = Query(default=None),
+):
+    return await get_user_history_data(user_id, limit=limit, mode=mode)
 
 
-async def get_user_history_data(user_id: int):
+async def get_user_history_data(user_id: int, limit: int = 10, mode: str | None = None):
     query = """
         SELECT id, created_at, mode, result, score, rank_change, opponent_name, player_color
         FROM game_history
         WHERE user_id = :uid
-        ORDER BY created_at DESC
-        LIMIT 10
     """
-    rows = await database.fetch_all(query=query, values={"uid": user_id})
+    values = {"uid": user_id, "limit": limit}
+
+    if mode:
+        normalized_mode = _normalize_mode(mode)
+        if normalized_mode == "1vs1":
+            query += " AND mode IN ('1vs1', '1v1', '1vs1_skills', '1v1_skills')"
+        elif normalized_mode == "1vs1vs1vs1":
+            query += " AND mode IN ('1vs1vs1vs1', '1v1v1v1', '1vs1vs1vs1_skills', '1v1v1v1_skills')"
+        elif normalized_mode:
+            query += " AND mode = :mode"
+            values["mode"] = normalized_mode
+
+    query += " ORDER BY created_at DESC LIMIT :limit"
+
+    rows = await database.fetch_all(query=query, values=values)
 
     history = []
     for row in rows:
