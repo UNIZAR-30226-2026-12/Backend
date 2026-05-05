@@ -204,7 +204,9 @@ class GameManager:
         skill_tiles = game.get("skill_tiles", [])
         if [row, col] in skill_tiles:
             skill_tiles.remove([row, col])
-            skill = get_random_skill()
+            # skip_rival no tiene efecto en 1v1: excluirla del sorteo
+            exclude = ["skip_rival"] if _is_1v1(game.get("mode", "")) else []
+            skill = get_random_skill(exclude=exclude)
             game["skills_inventory"][player].append(skill)
             return skill
         return None
@@ -366,8 +368,9 @@ class GameManager:
         # --- BRANCH LOGIC FOR EACH SKILL ---
         if skill_type == "gravity":
             direction = skill_data.get("direction")
-            if not direction:
-                return False, "Direccion de gravedad no especificada"
+            VALID_DIRECTIONS = {"up", "down", "left", "right"}
+            if not direction or direction not in VALID_DIRECTIONS:
+                return False, f"Direccion de gravedad invalida. Usa: {', '.join(sorted(VALID_DIRECTIONS))}"
             
             game["board"], game["skill_tiles"] = apply_gravity(game["board"], direction, fixed_set, game.get("skill_tiles", []))
             success, msg = True, f"Gravedad aplicada hacia {direction}"
@@ -430,7 +433,8 @@ class GameManager:
             else: return False, "No hay rival al que saltar"
 
         elif skill_type == "lose_turn":
-            success, msg = True, "Has decidido perder tu turno"
+            game["skip_next_turn"][player] = True
+            success, msg = True, "Has decidido perder tu turno actual y el siguiente"
 
         elif skill_type == "flip_rival":
             r, c = skill_data.get("row"), skill_data.get("col")
@@ -468,7 +472,7 @@ class GameManager:
             idx_t = random.randint(0, len(target_inv)-1)
             
             # Guardamos para el mensaje
-            s_p = player_inv[given_index]
+            s_p = inventory[given_index]
             s_t = target_inv[idx_t]
             
             # Intercambiamos sin usar pop todavia para no alterar indices
@@ -484,7 +488,7 @@ class GameManager:
             if len(inventory) <= 2: return False, "No tienes otra habilidad para regalar"
             if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a regalar no valida"
 
-            skill_to_gift = game["skills_inventory"][player]
+            skill_to_gift = inventory[given_index]
             
             inventory.pop(given_index) 
             
