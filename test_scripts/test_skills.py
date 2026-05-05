@@ -1262,6 +1262,451 @@ async def run_ai_invalid_skill_fallback_4p_test():
 
 
 # ─────────────────────────────────────────────
+#  BLOQUE 9: GRAVEDAD (1v1)
+# ─────────────────────────────────────────────
+
+async def run_gravity_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 9: HABILIDAD DE GRAVEDAD (1v1)")
+    print("="*60)
+
+    u1, u2 = f"gv1_{uuid.uuid4().hex[:4]}", f"gv2_{uuid.uuid4().hex[:4]}"
+    t1, t2 = None, None
+
+    try:
+        step(1, f"Preparando partida 1v1_skills entre {u1} y {u2}...")
+        t1, t2 = create_and_login(u1), create_and_login(u2)
+        game_id = create_game_and_join(t1, [t2], mode="1v1_skills")
+        ok("Sala 1v1_skills creada")
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+
+            for _ in range(3):
+                await safe_recv(ws1, timeout=0.5)
+                await safe_recv(ws2, timeout=0.5)
+
+            step(2, "Ready de ambos jugadores...")
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            for _ in range(8):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update" and msg.get("payload", {}).get("status") == "playing":
+                    break
+            ok("Partida en curso.")
+
+            # Tablero de prueba:
+            #   B en (0,3): ficha normal negra (debería caer a (7,3) con gravedad "down")
+            #   W en (2,4): ficha normal blanca
+            #   B en (5,5): ficha FIJA negra (NO se mueve)
+            #   skill_tile en (3,3): interrogante fijo (NO se mueve)
+            step(3, "Forzando tablero para test de gravedad (fichas, fija e interrogante)...")
+            test_board = [[None]*8 for _ in range(8)]
+            test_board[0][3] = "black"   # ficha normal → debe caer al fondo
+            test_board[2][4] = "white"   # ficha normal blanca → debe caer
+            test_board[5][5] = "black"   # ficha FIJA negra → NO se mueve
+
+            await ws1.send(json.dumps({
+                "action": "debug_force_state",
+                "board": test_board,
+                "current_player": "black",
+                "fixed_pieces": [[5, 5]],
+                "skills_inventory": {"black": [], "white": []}
+            }))
+            # Damos la gravity y ponemos un skill_tile en (3,3) via debug_give_skill
+            await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "gravity"}))
+
+            # Esperamos estado con gravity en inventario
+            state_pre = None
+            for _ in range(15):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    inv = msg.get("payload", {}).get("skills_inventory", {}).get("black", [])
+                    if "gravity" in inv:
+                        state_pre = msg
+                        break
+
+            assert state_pre is not None, "No se recibió estado con gravity en inventario"
+            ok("Tablero con ficha fija y gravity preparado.")
+            print("\n  [TABLERO ANTES DE LA GRAVEDAD]")
+            print_ascii_board(state_pre["payload"]["board"])
+
+            # ══════════════════════════════════════════
+            # SUB-TEST 9a: fichas normales se desplazan "down"
+            # ══════════════════════════════════════════
+            step(4, "[9a] Aplicando gravedad 'down': fichas normales deben caer al fondo...")
+            await ws1.send(json.dumps({
+                "action": "use_skill",
+                "type": "gravity",
+                "direction": "down"
+            }))
+
+            state_post = None
+            for _ in range(15):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    inv = msg.get("payload", {}).get("skills_inventory", {}).get("black", [])
+                    if "gravity" not in inv:
+                        state_post = msg
+                        break
+
+            assert state_post is not None, "No se recibió estado tras gravity"
+            board_post = state_post["payload"]["board"]
+            fp_post = state_post["payload"].get("fixed_pieces", [])
+            print("\n  [TABLERO DESPUÉS DE GRAVEDAD DOWN]")
+            print_ascii_board(board_post)
+
+            # La ficha negra (0,3) debe haber caído: la última fila libre de la columna 3 es (7,3)
+            assert board_post[7][3] == "black", \
+                f"Gravedad down: (0,3) negra debería haber caído a (7,3) pero es {board_post[7][3]}"
+            assert board_post[0][3] is None, \
+                f"Gravedad down: (0,3) debería quedar vacía pero es {board_post[0][3]}"
+            ok("Ficha negra (0,3) cayó correctamente a (7,3). ✓")
+
+            # La ficha blanca (2,4) debe haber caído a (7,4)
+            assert board_post[7][4] == "white", \
+                f"Gravedad down: (2,4) blanca debería haber caído a (7,4) pero es {board_post[7][4]}"
+            ok("Ficha blanca (2,4) cayó correctamente a (7,4). ✓")
+
+            # ══════════════════════════════════════════
+            # SUB-TEST 9b: ficha FIJA no se mueve
+            # ══════════════════════════════════════════
+            step(5, "[9b] La ficha FIJA en (5,5) NO debe haberse movido...")
+            assert board_post[5][5] == "black", \
+                f"Gravedad down: ficha FIJA (5,5) negra NO debe moverse, pero es {board_post[5][5]}"
+            assert [5, 5] in fp_post, \
+                f"fixed_pieces debería seguir conteniendo [5,5], pero es {fp_post}"
+            ok("Ficha fija (5,5) no se movió. ✓")
+
+            # ══════════════════════════════════════════
+            # SUB-TEST 9c: dirección inválida es rechazada
+            # ══════════════════════════════════════════
+            step(6, "[9c] Dirección inválida debe ser rechazada por el servidor...")
+            # Primero dar una nueva gravity al jugador en turno (ahora es blancas)
+            await ws1.send(json.dumps({"action": "debug_give_skill", "player": "white", "skill": "gravity"}))
+            for _ in range(8):
+                msg = await safe_recv(ws1, timeout=0.8)
+                if msg and msg.get("type") == "game_state_update":
+                    inv = msg.get("payload", {}).get("skills_inventory", {}).get("white", [])
+                    if "gravity" in inv:
+                        break
+
+            # Forzamos turno de blancas
+            await ws1.send(json.dumps({
+                "action": "debug_force_state",
+                "board": board_post,
+                "current_player": "white",
+                "fixed_pieces": fp_post,
+                "skills_inventory": {"black": [], "white": ["gravity"]}
+            }))
+            for _ in range(8):
+                msg = await safe_recv(ws1, timeout=0.8)
+                if msg and msg.get("type") == "game_state_update":
+                    if msg.get("payload", {}).get("current_player") == "white":
+                        break
+
+            await ws2.send(json.dumps({
+                "action": "use_skill",
+                "type": "gravity",
+                "direction": "diagonal"  # dirección inválida
+            }))
+
+            err_dir = None
+            for _ in range(10):
+                msg = await safe_recv(ws2, timeout=1.0)
+                if msg and msg.get("type") == "error":
+                    err_dir = msg
+                    break
+
+            assert err_dir is not None, "El servidor debería rechazar una dirección de gravedad inválida"
+            assert "invalida" in err_dir["payload"]["message"].lower() or \
+                   "Usa:" in err_dir["payload"]["message"], \
+                f"Mensaje de error inesperado: {err_dir}"
+            ok("Dirección inválida rechazada con mensaje descriptivo. ✓")
+
+        print("\n  ✔ BLOQUE 9 PASADO: Habilidad de Gravedad 1v1 OK")
+        return True
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 9 FALLIDO: {e}")
+        return False
+    finally:
+        if t1: delete_user(t1, u1)
+        if t2: delete_user(t2, u2)
+
+
+# ─────────────────────────────────────────────
+#  BLOQUE 10: LOSE_TURN (pierde turno actual + siguiente)
+# ─────────────────────────────────────────────
+
+async def run_lose_turn_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 10: HABILIDAD LOSE_TURN (pierde 2 turnos)")
+    print("="*60)
+
+    u1, u2 = f"lt1_{uuid.uuid4().hex[:4]}", f"lt2_{uuid.uuid4().hex[:4]}"
+    t1, t2 = None, None
+
+    try:
+        step(1, f"Preparando partida 1v1_skills entre {u1} y {u2}...")
+        t1, t2 = create_and_login(u1), create_and_login(u2)
+        game_id = create_game_and_join(t1, [t2], mode="1v1_skills")
+        ok("Sala 1v1_skills creada")
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+
+            for _ in range(3):
+                await safe_recv(ws1, timeout=0.5)
+                await safe_recv(ws2, timeout=0.5)
+
+            step(2, "Ready de ambos jugadores...")
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            for _ in range(8):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update" and msg.get("payload", {}).get("status") == "playing":
+                    break
+            ok("Partida en curso.")
+
+            step(3, "Forzando tablero y dando lose_turn a negras...")
+            test_board = [[None]*8 for _ in range(8)]
+            test_board[3][3] = "white"
+            test_board[3][4] = "black"
+            test_board[4][3] = "black"
+            test_board[4][4] = "white"
+            test_board[2][3] = "white"
+            test_board[2][4] = "white"
+            test_board[5][3] = "black"
+            test_board[5][4] = "black"
+
+            await ws1.send(json.dumps({
+                "action": "debug_force_state",
+                "board": test_board,
+                "current_player": "black",
+                "fixed_pieces": [],
+                "skills_inventory": {"black": [], "white": []}
+            }))
+            await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "lose_turn"}))
+
+            state_ready = None
+            for _ in range(15):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    inv = msg.get("payload", {}).get("skills_inventory", {}).get("black", [])
+                    if "lose_turn" in inv:
+                        state_ready = msg
+                        break
+
+            assert state_ready is not None, "No se recibió estado con lose_turn en inventario"
+            ok("Tablero y lose_turn preparados.")
+
+            step(4, "Negras usan lose_turn: el turno debe pasar a blancas...")
+            await ws1.send(json.dumps({
+                "action": "use_skill",
+                "type": "lose_turn"
+            }))
+
+            # Tras usar lose_turn, el turno pasa a blancas (turno actual consumido)
+            state_after_use = None
+            for _ in range(15):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    inv = msg.get("payload", {}).get("skills_inventory", {}).get("black", [])
+                    if "lose_turn" not in inv:
+                        state_after_use = msg
+                        break
+
+            assert state_after_use is not None, "No se recibió estado tras usar lose_turn"
+            payload_after = state_after_use["payload"]
+
+            assert payload_after["current_player"] == "white", \
+                f"Tras lose_turn de negras, el turno debe pasar a blancas, pero es {payload_after['current_player']}"
+            ok("El turno actual de negras se consumió: turno pasa a blancas. ✓")
+
+            step(5, "Blancas hacen un movimiento normal (turno de blancas)...")
+            valid_moves = payload_after.get("valid_moves", [])
+            assert valid_moves, "Blancas deben tener movimientos válidos"
+            move = valid_moves[0]
+            await ws2.send(json.dumps({"action": "make_move", "row": move["row"], "col": move["col"]}))
+
+            # Tras el movimiento de blancas, el turno debería saltar a blancas de nuevo (skip de negras)
+            state_after_white_move = None
+            for _ in range(15):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update":
+                    if msg.get("payload", {}).get("current_player") != "black":
+                        state_after_white_move = msg
+                        break
+                    # Si el turno volvió a negro puede ser que el skip no funcionó
+                    if msg.get("payload", {}).get("current_player") == "black":
+                        state_after_white_move = msg
+                        break
+
+            assert state_after_white_move is not None, "No se recibió estado tras movimiento de blancas"
+            next_player = state_after_white_move["payload"]["current_player"]
+
+            # El turno siguiente de negras fue saltado: el turno debería volver a blancas
+            assert next_player == "white", \
+                f"lose_turn debe saltar el SIGUIENTE turno de negras, pero el turno es {next_player}"
+            ok("El siguiente turno de negras fue saltado correctamente: blancas juegan 2 veces consecutivas. ✓")
+
+        print("\n  ✔ BLOQUE 10 PASADO: lose_turn (2 turnos perdidos) OK")
+        return True
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 10 FALLIDO: {e}")
+        return False
+    finally:
+        if t1: delete_user(t1, u1)
+        if t2: delete_user(t2, u2)
+
+
+# ─────────────────────────────────────────────
+#  BLOQUE 11: skip_rival NO aparece en 1v1
+# ─────────────────────────────────────────────
+
+async def run_skip_rival_pool_1v1_test():
+    print("\n" + "="*60)
+    print("  BLOQUE 11: skip_rival NO debe aparecer en pool de recompensas 1v1")
+    print("="*60)
+
+    u1, u2 = f"sr1_{uuid.uuid4().hex[:4]}", f"sr2_{uuid.uuid4().hex[:4]}"
+    t1, t2 = None, None
+
+    try:
+        step(1, f"Preparando partida 1v1_skills entre {u1} y {u2}...")
+        t1, t2 = create_and_login(u1), create_and_login(u2)
+        game_id = create_game_and_join(t1, [t2], mode="1v1_skills")
+        ok("Sala 1v1_skills creada")
+
+        async with websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t1}") as ws1, \
+                   websockets.connect(f"{WS_URL}/ws/play/{game_id}?token={t2}") as ws2:
+
+            for _ in range(3):
+                await safe_recv(ws1, timeout=0.5)
+                await safe_recv(ws2, timeout=0.5)
+
+            step(2, "Ready de ambos jugadores...")
+            await ws1.send(json.dumps({"action": "set_ready", "ready": True}))
+            await ws2.send(json.dumps({"action": "set_ready", "ready": True}))
+            for _ in range(8):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "game_state_update" and msg.get("payload", {}).get("status") == "playing":
+                    break
+            ok("Partida en curso.")
+
+            # Ponemos una skill_tile en (0,3) y forzamos a negro a caer sobre ella
+            # haciendo muchos aterrizajes y viendo que skip_rival nunca aparece
+            step(3, "Forzando 50 aterrizajes en skill_tile para estadística...")
+            collected = []
+            ITERATIONS = 50
+
+            for i in range(ITERATIONS):
+                # Tablero mínimo: negro con movimiento que cae en skill_tile (0,3)
+                b = [[None]*8 for _ in range(8)]
+                b[0][4] = "black"
+                b[0][3] = "white"
+                b[1][3] = "black"
+
+                await ws1.send(json.dumps({
+                    "action": "debug_force_state",
+                    "board": b,
+                    "current_player": "black",
+                    "fixed_pieces": [],
+                    "skills_inventory": {"black": [], "white": []},
+                    "skill_tiles": [[0, 2]]   # la skill_tile está en (0,2)
+                }))
+
+                # Negro juega en (0,2) → aterriza en skill_tile
+                state_with_tile = None
+                for _ in range(10):
+                    msg = await safe_recv(ws1, timeout=0.5)
+                    if msg and msg.get("type") == "game_state_update":
+                        tiles = msg.get("payload", {}).get("skill_tiles", [])
+                        if [0, 2] in tiles:
+                            state_with_tile = msg
+                            break
+
+                if not state_with_tile:
+                    continue  # algo fue mal, seguimos
+
+                await ws1.send(json.dumps({"action": "make_move", "row": 0, "col": 2}))
+
+                for _ in range(10):
+                    msg = await safe_recv(ws1, timeout=0.5)
+                    if msg and msg.get("type") == "game_state_update":
+                        inv = msg.get("payload", {}).get("skills_inventory", {}).get("black", [])
+                        if inv:
+                            collected.extend(inv)
+                            break
+
+            debug(f"Skills obtenidas en {ITERATIONS} aterrizajes (muestra): {set(collected)}")
+            assert len(collected) > 0, "No se recopiló ninguna skill en los aterrizajes. Revisar fixture."
+
+            assert "skip_rival" not in collected, \
+                f"skip_rival NO debe aparecer en el pool 1v1, pero se obtuvo. Skills: {set(collected)}"
+            ok(f"skip_rival nunca apareció en {len(collected)} skills recogidas en modo 1v1. ✓")
+
+            # Verificar que skip_rival SÍ se puede inyectar via debug_give_skill (para no romper otros tests)
+            step(4, "Verificar que skip_rival puede inyectarse manualmente (debug_give_skill) pero el servidor la rechaza al usarla en 1v1...")
+            await ws1.send(json.dumps({"action": "debug_give_skill", "player": "black", "skill": "skip_rival"}))
+
+            state_with_skip = None
+            for _ in range(10):
+                msg = await safe_recv(ws1, timeout=0.8)
+                if msg and msg.get("type") == "game_state_update":
+                    inv = msg.get("payload", {}).get("skills_inventory", {}).get("black", [])
+                    if "skip_rival" in inv:
+                        state_with_skip = msg
+                        break
+
+            assert state_with_skip is not None, "No se pudo inyectar skip_rival vía debug"
+            ok("skip_rival inyectada manualmente confirmada.")
+
+            # Forzamos turno negro y usamos skip_rival: el servidor debe rechazarla
+            await ws1.send(json.dumps({
+                "action": "debug_force_state",
+                "board": state_with_skip["payload"]["board"],
+                "current_player": "black",
+                "fixed_pieces": [],
+                "skills_inventory": state_with_skip["payload"]["skills_inventory"]
+            }))
+            for _ in range(5):
+                msg = await safe_recv(ws1, timeout=0.5)
+                if msg and msg.get("payload", {}).get("current_player") == "black":
+                    break
+
+            await ws1.send(json.dumps({"action": "use_skill", "type": "skip_rival"}))
+
+            err_skip = None
+            for _ in range(10):
+                msg = await safe_recv(ws1, timeout=1.0)
+                if msg and msg.get("type") == "error":
+                    err_skip = msg
+                    break
+
+            assert err_skip is not None, "El servidor debería rechazar skip_rival en modo 1v1"
+            ok(f"skip_rival rechazada correctamente en 1v1: '{err_skip['payload']['message']}'. ✓")
+
+        print("\n  ✔ BLOQUE 11 PASADO: skip_rival excluida del pool 1v1 OK")
+        return True
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n  ✘ BLOQUE 11 FALLIDO: {e}")
+        return False
+    finally:
+        if t1: delete_user(t1, u1)
+        if t2: delete_user(t2, u2)
+
+
+# ─────────────────────────────────────────────
 #  RUNNER PRINCIPAL
 # ─────────────────────────────────────────────
 
@@ -1275,6 +1720,9 @@ async def async_main():
     results["fix_piece resiste turno IA (vs_ai)"] = await run_fix_piece_vs_ai_test()
     results["IA fallback skill invalida (vs_ai)"] = await run_ai_invalid_skill_fallback_vs_ai_test()
     results["IA fallback skill invalida (4P)"]    = await run_ai_invalid_skill_fallback_4p_test()
+    results["Gravedad 1v1 (fichas, fijas, dir)"]  = await run_gravity_test()
+    results["lose_turn (2 turnos perdidos)"]      = await run_lose_turn_test()
+    results["skip_rival excluida del pool 1v1"]   = await run_skip_rival_pool_1v1_test()
 
     print("\n" + "#"*60)
     print("  RESUMEN FINAL SKILLS")
@@ -1285,4 +1733,4 @@ async def async_main():
     print(f"\n  Resultado: {passed}/{len(results)} bloques pasados")
 
 if __name__ == "__main__":
-    asyncio.run(async_main())
+    asyncio.run(async_main())
