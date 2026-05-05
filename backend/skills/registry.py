@@ -16,9 +16,10 @@ SKILLS_LIST = [
     "give_skill"     # 12. Dar habilidad
 ]
 
-def get_random_skill() -> str:
-    """Retorna una habilidad aleatoria de la lista oficial."""
-    return random.choice(SKILLS_LIST)
+def get_random_skill(exclude: list = None) -> str:
+    """Retorna una habilidad aleatoria de la lista oficial. Se pueden excluir skills concretas."""
+    pool = [s for s in SKILLS_LIST if s not in (exclude or [])]
+    return random.choice(pool) if pool else random.choice(SKILLS_LIST)
 
 # --- Metadata de Habilidades (Para futuro uso de la IA y Dispatcher) ---
 SKILLS_CONFIG = {
