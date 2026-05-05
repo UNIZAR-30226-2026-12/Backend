@@ -4,13 +4,13 @@
 
 | ID | Nombre | Descripción | Tipo |
 |---|---|---|---|
-| gravity | Gravedad | Desplaza fichas en dirección elegida | Ofensivo |
+| ✔️ gravity | Gravedad | Desplaza fichas en dirección elegida | Ofensivo |
 | ✔️ bomb | Bomba 3x3 | Voltea fichas en área 3x3 | Ofensivo |
 | ✔️ fix_piece | Ficha Fija | Coloca ficha permanente e inmune | Defensivo |
 | ✔️ unfix_piece | Quitar Ficha Fija | Elimina ficha fija | Herramienta |
 | ✔️ place_free | Ficha Libre | Coloca ficha sin captura | Ofensivo |
 | ✔️ skip_rival | Saltar Turno | Omite turno siguiente | Control |
-| ✔️ lose_turn | Perder Turno | Usuario pierde siguiente turno | Negativo |
+| ✔️ lose_turn | Perder Turno | Pierde turno actual y el siguiente | Negativo |
 | ✔️ flip_rival | Voltear Ficha | Convierte ficha rival | Ofensivo |
 | ✔️ swap_colors | Intercambio Color | Intercambia colores | Control |
 | ✔️ steal_skill | Robar Habilidad | Roba skill aleatoria | Robo |
@@ -34,9 +34,13 @@
 
 **Tipo:** Ofensivo | **Modos:** 1v1, 4P | **Target:** No | **Dirección:** Sí
 
-El jugador elige dirección (arriba, abajo, izquierda, derecha) y todas las fichas no fijas se desplazan hasta chocar con borde u otra ficha.
+El jugador elige dirección (arriba, abajo, izquierda, derecha) y todas las fichas no fijas se desplazan hasta chocar con el borde o con otra ficha.
 
-**Notas:** No afecta fichas fijas.
+**Notas:**
+
+- No afecta a las fichas fijas (permanecen en su posición).
+- Las casillas de interrogante (`?`) son **fijas**: no se desplazan con la gravedad.
+- Las fichas sí pueden caer sobre una casilla de interrogante y "apilarse" encima. El interrogante permanece y podrá ser recogido en un turno posterior mediante un movimiento normal.
 
 ---
 
@@ -47,6 +51,7 @@ El jugador elige dirección (arriba, abajo, izquierda, derecha) y todas las fich
 Voltea fichas en área 3x3 centrada en objetivo.
 
 **Comportamiento:**
+
 - 1v1: Fichas voltean al color contrario
 - 4P: Se asignan al jugador con menos fichas (empate = aleatorio)
 
@@ -92,7 +97,9 @@ Omite un turno completo del siguiente jugador en la rotación.
 
 **Tipo:** Negativo | **Modos:** 1v1, 4P | **Target:** No | **Dirección:** No
 
-El usuario pierde su siguiente turno automáticamente. Puede usarse de forma táctica.
+Al usarla, el jugador pierde el turno **actual** (por el propio uso de la habilidad) y además el **siguiente** turno queda bloqueado. Efecto neto: el rival juega dos turnos consecutivos.
+
+Crea tensión estratégica cuando se recibe de un rival (vía `give_skill` o `exchange_skill`): el jugador debe elegir entre usarla y perder dos turnos, o no usarla y pagar la penalización de -2 pts al final.
 
 ---
 
