@@ -1733,4 +1733,4 @@ async def async_main():
     print(f"\n  Resultado: {passed}/{len(results)} bloques pasados")
 
 if __name__ == "__main__":
-    asyncio.run(async_main())
+    asyncio.run(async_main())
