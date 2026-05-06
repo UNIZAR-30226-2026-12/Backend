@@ -285,9 +285,12 @@ def test_steal_and_exchange():
     print("="*60)
 
     step(1, "steal_skill: dos rivales, uno con 1 skill y otro con 3 → roba al de 3")
-    board = empty_board()
-    board[4][4] = "white"
-    board[3][3] = "black"
+    board = empty_board(16)
+    # Posicion central: movimientos normales valen poco (peso 1)
+    board[7][7] = "white"
+    board[7][8] = "black"
+    board[8][8] = "red"
+    board[8][7] = "blue"
 
     # En 4P tenemos dos rivales
     state = {
@@ -360,26 +363,27 @@ def test_mistake_rate():
     print("  BLOQUE G: mistake rate — la IA falla ~15% de las veces")
     print("="*60)
 
-    step(1, "Ejecutar 200 llamadas con estado válido y contar cuántas devuelven None por mistake")
+    step(1, "Ejecutar 200 llamadas con estado valido y contar cuantas devuelven None por mistake")
     board = empty_board()
     board[4][4] = "white"
     board[3][3] = "black"
     board[3][4] = "black"
     board[4][3] = "black"
+    board[0][0] = "black"  # ficha rival en esquina para flip_rival
 
-    # skip_rival siempre devuelve acción si está disponible (no tiene condición extra)
-    # Es la skill más simple → cualquier None es el mistake rate
-    state = make_state(board, ai_player="white", skills=["skip_rival"])
+    # flip_rival siempre tiene un target valido (rival en esquina peso 100)
+    # y su skill_score sera alto -> cualquier None es el mistake rate
+    state = make_state(board, ai_player="white", skills=["flip_rival"])
 
     SAMPLES = 200
     nones = sum(1 for _ in range(SAMPLES) if get_ai_skill_action(state, "white") is None)
     rate = nones / SAMPLES
     debug(f"None devueltos: {nones}/{SAMPLES} = {rate:.1%}")
 
-    # Esperamos ~15% con margen estadístico: entre 5% y 30%
+    # Esperamos ~15% con margen estadistico: entre 5% y 30%
     assert 0.04 <= rate <= 0.32, \
         f"Tasa de error fuera del margen esperado (5%-30%): {rate:.1%}"
-    ok(f"Tasa de error: {rate:.1%} — dentro del margen esperado (5%-30%). ✓")
+    ok(f"Tasa de error: {rate:.1%} -- dentro del margen esperado (5%-30%).")
 
     step(2, "Con inventario vacío, mistake rate no aplica: siempre devuelve None")
     state_empty = make_state(board, ai_player="white", skills=[])
