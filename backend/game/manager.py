@@ -462,7 +462,7 @@ class GameManager:
             target = skill_data.get("target_player")
             given_index = skill_data.get("given_skill_index")
             if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
-            if len(inventory) <= 2: return False, "No tienes otra habilidad para intercambiar"
+            if len(inventory) < 2: return False, "No tienes otra habilidad para intercambiar"
             if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a dar no valida"
             
             target_inv = game["skills_inventory"][target]
@@ -476,7 +476,7 @@ class GameManager:
             s_t = target_inv[idx_t]
             
             # Intercambiamos sin usar pop todavia para no alterar indices
-            player_inv[given_index] = s_t
+            inventory[given_index] = s_t
             target_inv[idx_t] = s_p
             
             success, msg = True, f"Intercambiada {s_p} por {s_t} con {target}"
@@ -485,7 +485,7 @@ class GameManager:
             target = skill_data.get("target_player")
             given_index = skill_data.get("given_skill_index")
             if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
-            if len(inventory) <= 2: return False, "No tienes otra habilidad para regalar"
+            if len(inventory) < 2: return False, "No tienes otra habilidad para regalar"
             if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a regalar no valida"
 
             skill_to_gift = inventory[given_index]
