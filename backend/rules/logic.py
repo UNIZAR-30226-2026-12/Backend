@@ -33,7 +33,8 @@ def is_on_board(r: int, c: int) -> bool:
 
 def get_valid_moves(board: Board, player: Player, fixed_pieces: set = None) -> List[Coordinate]:
     moves = []
-    if not player: return moves
+    if not player:
+        return moves
     for r in range(BOARD_SIZE):
         for c in range(BOARD_SIZE):
             if is_valid_move(board, player, r, c, fixed_pieces):
@@ -41,9 +42,11 @@ def get_valid_moves(board: Board, player: Player, fixed_pieces: set = None) -> L
     return moves
 
 def is_valid_move(board: Board, player: Player, row: int, col: int, fixed_pieces: set = None) -> bool:
-    if board[row][col] is not None: return False
+    if board[row][col] is not None:
+        return False
     opponent = 'white' if player == 'black' else 'black'
-    if fixed_pieces is None: fixed_pieces = set()
+    if fixed_pieces is None:
+        fixed_pieces = set()
     for dr, dc in DIRECTIONS:
         r, c = row + dr, col + dc
         found_opponent = False
@@ -55,9 +58,11 @@ def is_valid_move(board: Board, player: Player, row: int, col: int, fixed_pieces
                     break
                 found_opponent = True
             elif cell == player:
-                if found_opponent: return True
+                if found_opponent:
+                    return True
                 break
-            else: break
+            else:
+                break
             r += dr
             c += dc
     return False
@@ -66,7 +71,8 @@ def apply_move(board: Board, player: Player, row: int, col: int, fixed_pieces: s
     new_board = copy.deepcopy(board)
     new_board[row][col] = player
     opponent = 'white' if player == 'black' else 'black'
-    if fixed_pieces is None: fixed_pieces = set()
+    if fixed_pieces is None:
+        fixed_pieces = set()
     for dr, dc in DIRECTIONS:
         r, c = row + dr, col + dc
         to_flip = []
@@ -79,7 +85,8 @@ def apply_move(board: Board, player: Player, row: int, col: int, fixed_pieces: s
                     break
                 to_flip.append((r, c))
             elif cell == player:
-                if to_flip: possible_flip = True
+                if to_flip:
+                    possible_flip = True
                 break
             else: 
                 to_flip = []
@@ -87,7 +94,8 @@ def apply_move(board: Board, player: Player, row: int, col: int, fixed_pieces: s
             r += dr
             c += dc
         if possible_flip:
-            for fr, fc in to_flip: new_board[fr][fc] = player
+            for fr, fc in to_flip:
+                new_board[fr][fc] = player
     return new_board
 
 def count_score(board: Board) -> Dict[str, int]:
@@ -97,7 +105,8 @@ def count_score(board: Board) -> Dict[str, int]:
     }
 
 def resolve_game_state(board: List[List[Optional[str]]], next_player: str, fixed_pieces: set = None) -> Tuple[bool, Optional[str], Optional[str], list]:
-    if fixed_pieces is None: fixed_pieces = set()
+    if fixed_pieces is None:
+        fixed_pieces = set()
     valid_moves_next = get_valid_moves(board, next_player, fixed_pieces)
     if len(valid_moves_next) > 0:
         return False, None, next_player, valid_moves_next
@@ -108,9 +117,12 @@ def resolve_game_state(board: List[List[Optional[str]]], next_player: str, fixed
         return False, None, other_player, valid_moves_other
 
     score = count_score(board)
-    if score["black"] > score["white"]: winner = "black"
-    elif score["white"] > score["black"]: winner = "white"
-    else: winner = "draw"
+    if score["black"] > score["white"]:
+        winner = "black"
+    elif score["white"] > score["black"]:
+        winner = "white"
+    else:
+        winner = "draw"
         
     return True, winner, None, []
 
@@ -142,7 +154,8 @@ def get_flips_4p(board: List[List[Optional[str]]], row: int, col: int, piece: st
     if board[row][col] is not None:
         return []
 
-    if fixed_pieces is None: fixed_pieces = set()
+    if fixed_pieces is None:
+        fixed_pieces = set()
     flips: List[Tuple[int, int]] = []
     for dr, dc in DIRECTIONS_4P:
         line: List[Tuple[int, int]] = []

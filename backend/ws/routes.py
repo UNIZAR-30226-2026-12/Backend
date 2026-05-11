@@ -23,8 +23,10 @@ def mode_to_api(mode: str) -> str:
     has_skills = "_skills" in mode
     base = mode.replace("_skills", "")
     suffix = "_skills" if has_skills else ""
-    if base == "1v1": return "1vs1" + suffix
-    if base in ("1v1v1v1", "1vs1vs1vs1"): return "1vs1vs1vs1" + suffix
+    if base == "1v1":
+        return "1vs1" + suffix
+    if base in ("1v1v1v1", "1vs1vs1vs1"):
+        return "1vs1vs1vs1" + suffix
     return mode
 
 async def get_room_players(game: dict) -> List[dict]:
@@ -71,28 +73,34 @@ async def broadcast_room_sync(game_id: str):
 def ensure_user_assigned_to_game(game: dict, username: str) -> Optional[str]:
     if game.get("mode") in ("1v1v1v1", "1v1v1v1_skills"):
         piece = game.get("piece_by_username", {}).get(username)
-        if piece: return piece
+        if piece:
+            return piece
         if username in game.get("participants", []):
             for np in TURN_ORDER_4P:
                 if not game.get("username_by_piece", {}).get(np):
                     game["username_by_piece"][np] = username
                     game["piece_by_username"][username] = np
-                    if np not in game.get("active_pieces", []): game["active_pieces"].append(np)
+                    if np not in game.get("active_pieces", []):
+                        game["active_pieces"].append(np)
                     game.setdefault("players_ready", {})[username] = False
                     return np
-        if len(game.get("participants", [])) >= game.get("participant_count_expected", 4): return None
+        if len(game.get("participants", [])) >= game.get("participant_count_expected", 4):
+            return None
         game.setdefault("participants", []).append(username)
         game.setdefault("players_ready", {})[username] = False
         for np in TURN_ORDER_4P:
             if not game.get("username_by_piece", {}).get(np):
                 game["username_by_piece"][np] = username
                 game["piece_by_username"][username] = np
-                if np not in game.get("active_pieces", []): game["active_pieces"].append(np)
+                if np not in game.get("active_pieces", []):
+                    game["active_pieces"].append(np)
                 return np
         return None
 
-    if game.get("black_player") == username: return "black"
-    if game.get("white_player") == username: return "white"
+    if game.get("black_player") == username:
+        return "black"
+    if game.get("white_player") == username:
+        return "white"
     if not game.get("black_player"):
         game["black_player"] = username
         game.setdefault("participants", []).append(username)
@@ -114,20 +122,30 @@ def schedule_room_cleanup(g_id: str, delay: int = 5):
 @router.websocket("/play/{game_id}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Query(...)):
     if not game_id.isdigit():
-        await websocket.accept(); await websocket.close(code=1008, reason="ID invalido"); return
+        await websocket.accept()
+        await websocket.close(code=1008, reason="ID invalido")
+        return
 
     user = await verify_token_ws(token)
     if not user:
-        await websocket.accept(); await websocket.close(code=1008, reason="Token invalido"); return
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Token invalido")
+        return
 
     username = user["username"]
     game = game_manager.get_game_state(game_id)
     if not game:
-        await websocket.accept(); await websocket.send_json({"error": "Sala no encontrada"}); await websocket.close(); return
+        await websocket.accept()
+        await websocket.send_json({"error": "Sala no encontrada"})
+        await websocket.close()
+        return
 
     assigned_piece = ensure_user_assigned_to_game(game, username)
     if not assigned_piece:
-        await websocket.accept(); await websocket.send_json({"type": "error", "payload": {"message": "La sala esta llena"}}); await websocket.close(); return
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "payload": {"message": "La sala esta llena"}})
+        await websocket.close()
+        return
 
     connected = await manager.connect(websocket, game_id, username)
     if not connected:
@@ -166,7 +184,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
         last_chat_time: float = 0.0
 
         def check_and_trigger_ai(current_state):
-            if not current_state or current_state.get("game_over"): return
+            if not current_state or current_state.get("game_over"):
+                return
 
             g_mode = current_state.get("mode", "")
             base_g_mode = g_mode.replace("_skills", "")
@@ -180,8 +199,10 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                 async def play_ai_turn():
                     await asyncio.sleep(0.5)
                     current = game_manager.get_game_state(game_id)
-                    if not current or current.get("game_over"): return
-                    if current.get("paused_usernames"): return
+                    if not current or current.get("game_over"):
+                        return
+                    if current.get("paused_usernames"):
+                        return
 
                     current_player = current.get("current_player")
                     current_mode = current.get("mode", "")
@@ -324,7 +345,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                         await database.execute("UPDATE lobbies SET status = 'finished' WHERE id = :id", {"id": int(game_id)})
                         schedule_room_cleanup(game_id)
                     await manager.broadcast_game_state(game_id, ns)
-                else: await manager.send_error(websocket, msg)
+                else:
+                    await manager.send_error(websocket, msg)
                 continue
 
             if action == "make_move":
@@ -350,7 +372,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                     await manager.broadcast_game_state(game_id, ns)
                     check_and_trigger_ai(ns)
                     
-                else: await manager.send_error(websocket, msg)
+                else:
+                    await manager.send_error(websocket, msg)
                 continue
 
             if action == "use_skill":
@@ -368,7 +391,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
 
     except Exception as e:
         manager.disconnect(websocket, game_id, username)
-        if not (game := game_manager.get_game_state(game_id)): return
+        if not (game := game_manager.get_game_state(game_id)):
+            return
 
         if game.get("status") == "waiting":
             async def waiting_disconnect_task():
@@ -458,5 +482,6 @@ async def notifications_endpoint(websocket: WebSocket, token: str = Query(...)):
     un = user["username"]
     await notifier.connect(websocket, un)
     try:
-        while True: await websocket.receive_text()
+        while True:
+            await websocket.receive_text()
     except WebSocketDisconnect: notifier.disconnect(un)

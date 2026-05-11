@@ -46,8 +46,10 @@ def evaluate_board(board: Board, player: Player) -> int:
     counts = count_score(board)
     for r in range(BOARD_SIZE):
         for c in range(BOARD_SIZE):
-            if board[r][c] == player: score += POSITION_WEIGHTS[r][c]
-            elif board[r][c] == opponent: score -= POSITION_WEIGHTS[r][c]
+            if board[r][c] == player:
+                score += POSITION_WEIGHTS[r][c]
+            elif board[r][c] == opponent:
+                score -= POSITION_WEIGHTS[r][c]
     
     my_moves = len(get_valid_moves(board, player))
     op_moves = len(get_valid_moves(board, opponent))
@@ -70,7 +72,8 @@ def minimax(board: Board, depth: int, alpha: float, beta: float, maximizing: boo
             eval_val = minimax(new_board, depth - 1, alpha, beta, False, ai_player)
             max_eval = max(max_eval, eval_val)
             alpha = max(alpha, eval_val)
-            if beta <= alpha: break
+            if beta <= alpha:
+                break
         return max_eval
     else:
         min_eval = float('inf')
@@ -79,12 +82,14 @@ def minimax(board: Board, depth: int, alpha: float, beta: float, maximizing: boo
             eval_val = minimax(new_board, depth - 1, alpha, beta, True, ai_player)
             min_eval = min(min_eval, eval_val)
             beta = min(beta, eval_val)
-            if beta <= alpha: break
+            if beta <= alpha:
+                break
         return min_eval
 
 def get_best_ai_move(board: Board, player: Player, fixed_pieces: set = None) -> Optional[Coordinate]:
     valid = get_valid_moves(board, player, fixed_pieces)
-    if not valid: return None
+    if not valid:
+        return None
     best_val, best_move = float('-inf'), valid[0]
     for m in valid:
         new_board = apply_move(board, player, m.row, m.col, fixed_pieces)
@@ -95,9 +100,8 @@ def get_best_ai_move(board: Board, player: Player, fixed_pieces: set = None) -> 
 
 def get_best_ai_move_4p(board: Board, player: str, fixed_pieces: set = None) -> Optional[dict]:
     valid = get_valid_moves_4p(board, player, fixed_pieces)
-    if not valid: 
+    if not valid:
         return None
-        
     best_val, best_move = float('-inf'), valid[0]
     
     for m in valid:

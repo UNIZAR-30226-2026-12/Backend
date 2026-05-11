@@ -55,21 +55,27 @@ class GameManager:
         game["paused_pieces"] = list(dict.fromkeys(paused_pieces))
 
     def create_game(self, creator_name: str, is_private: bool = False, game_id: str = None, mode: str = "1v1", invited_name: str = None, participants: Optional[List[str]] = None) -> str:
-        if not game_id: game_id = str(uuid.uuid4())
+        if not game_id:
+            game_id = str(uuid.uuid4())
 
         has_skills = "_skills" in mode
         base_mode = mode.replace("_skills", "")
 
         normalized_mode = "1v1"
-        if base_mode in ("1vs1", "1v1"): normalized_mode = "1v1"
-        elif base_mode in ("1vs1vs1vs1", "1v1v1v1"): normalized_mode = "1v1v1v1"
-        elif base_mode == "vs_ai": normalized_mode = "vs_ai"
-        if has_skills: normalized_mode += "_skills"
+        if base_mode in ("1vs1", "1v1"):
+            normalized_mode = "1v1"
+        elif base_mode in ("1vs1vs1vs1", "1v1v1v1"):
+            normalized_mode = "1v1v1v1"
+        elif base_mode == "vs_ai":
+            normalized_mode = "vs_ai"
+        if has_skills:
+            normalized_mode += "_skills"
 
         participant_list: List[str] = [name for name in (participants or []) if name]
         if not participant_list:
             participant_list = [creator_name]
-            if invited_name: participant_list.append(invited_name)
+            if invited_name:
+                participant_list.append(invited_name)
 
         if _is_4p(normalized_mode):
             board = create_initial_board_4p()
@@ -107,8 +113,10 @@ class GameManager:
         white_player = "IA" if normalized_mode.replace("_skills", "") == "vs_ai" else (participant_list[1] if len(participant_list) > 1 else None)
 
         players_ready = {black_player: False}
-        if white_player and white_player != "IA": players_ready[white_player] = False
-        elif white_player == "IA": players_ready["IA"] = True
+        if white_player and white_player != "IA":
+            players_ready[white_player] = False
+        elif white_player == "IA":
+            players_ready["IA"] = True
 
         skill_tiles = self._generate_skill_tiles(normalized_mode, has_skills)
         self.active_games[game_id] = {
@@ -176,13 +184,16 @@ class GameManager:
 
     def are_all_players_ready(self, game_id: str) -> bool:
         game = self.active_games.get(game_id)
-        if not game or game.get("status") != "waiting": return False
+        if not game or game.get("status") != "waiting":
+            return False
         participants = game.get("participants", [])
-        if len(participants) != game.get("participant_count_expected", 2): return False
+        if len(participants) != game.get("participant_count_expected", 2):
+            return False
         return all(bool(game.get("players_ready", {}).get(u, False)) for u in participants)
 
     def _generate_skill_tiles(self, mode: str, has_skills: bool) -> List[List[int]]:
-        if not has_skills: return []
+        if not has_skills:
+            return []
         is_4p = _is_4p(mode)
         size = 16 if is_4p else 8
         count = 10 if is_4p else 5
@@ -215,7 +226,8 @@ class GameManager:
     def _next_piece_with_moves_4p(self, game: dict, start_piece: str) -> Optional[str]:
         turn_order = game["turn_order"]
         active_pieces = [p for p in turn_order if p in game.get("active_pieces", [])]
-        if not active_pieces: return None
+        if not active_pieces:
+            return None
 
         start_idx = turn_order.index(start_piece) if start_piece in turn_order else -1
         for step in range(1, len(turn_order) + 1):
@@ -241,21 +253,29 @@ class GameManager:
 
     async def make_move(self, game_id: str, player: str, row: int, col: int) -> Tuple[bool, str]:
         game = self.active_games.get(game_id)
-        if not game: return False, "Partida no encontrada"
-        if game.get("status") != "playing": return False, "La partida no esta en curso"
-        if game.get("game_over") or game.get("invalidated"): return False, "La partida ha terminado o es invalida"
-        if player in game.get("paused_pieces", []): return False, "Jugador en pausa"
+        if not game:
+            return False, "Partida no encontrada"
+        if game.get("status") != "playing":
+            return False, "La partida no esta en curso"
+        if game.get("game_over") or game.get("invalidated"):
+            return False, "La partida ha terminado o es invalida"
+        if player in game.get("paused_pieces", []):
+            return False, "Jugador en pausa"
 
         if _is_4p(game.get("mode", "")):
-            if player not in game.get("active_pieces", []): return False, "Jugador no activo"
-            if game["current_player"] != player: return False, "No es tu turno"
+            if player not in game.get("active_pieces", []):
+                return False, "Jugador no activo"
+            if game["current_player"] != player:
+                return False, "No es tu turno"
             
             fixed_pieces = {tuple(p) for p in game.get("fixed_pieces", [])}
             flips = get_flips_4p(game["board"], row, col, player, fixed_pieces)
-            if not flips: return False, "Movimiento invalido"
+            if not flips:
+                return False, "Movimiento invalido"
 
             game["board"][row][col] = player
-            for fr, fc in flips: game["board"][fr][fc] = player
+            for fr, fc in flips:
+                game["board"][fr][fc] = player
             game["last_move"] = {"row": row, "col": col}
             
             # Check for skill tile
@@ -295,13 +315,16 @@ class GameManager:
                     game["valid_moves"] = get_valid_moves_4p(game["board"], next_piece, {tuple(p) for p in game.get("fixed_pieces", [])})
             
             msg = "Movimiento realizado"
-            if obtained_skill: msg += f". Has obtenido la habilidad: {obtained_skill}"
+            if obtained_skill:
+                msg += f". Has obtenido la habilidad: {obtained_skill}"
             return True, msg
 
         # --- 1V1 LOGIC ---
-        if game["current_player"] != player: return False, "No es tu turno"
+        if game["current_player"] != player:
+            return False, "No es tu turno"
         fixed_pieces = {tuple(p) for p in game.get("fixed_pieces", [])}
-        if not is_valid_move(game["board"], player, row, col, fixed_pieces): return False, "Movimiento invalido"
+        if not is_valid_move(game["board"], player, row, col, fixed_pieces):
+            return False, "Movimiento invalido"
 
         game["board"] = apply_move(game["board"], player, row, col, fixed_pieces)
         game["last_move"] = {"row": row, "col": col}
@@ -325,19 +348,23 @@ class GameManager:
         game["valid_moves"] = [m.dict() for m in valid]
         game["score"] = count_score(game["board"])
 
-        if over: 
+        if over:
             game["status"] = "finished"
             await self.save_game_results(game_id)
             
         msg = "Movimiento realizado"
-        if obtained_skill: msg += f". Has obtenido la habilidad: {obtained_skill}"
+        if obtained_skill:
+            msg += f". Has obtenido la habilidad: {obtained_skill}"
         return True, msg
 
     async def use_skill(self, game_id: str, player: str, skill_data: dict) -> Tuple[bool, str]:
         game = self.active_games.get(game_id)
-        if not game: return False, "Partida no encontrada"
-        if game.get("status") != "playing": return False, "La partida no esta en curso"
-        if game.get("current_player") != player: return False, "No es tu turno"
+        if not game:
+            return False, "Partida no encontrada"
+        if game.get("status") != "playing":
+            return False, "La partida no esta en curso"
+        if game.get("current_player") != player:
+            return False, "No es tu turno"
         
         skill_type = skill_data.get("type")
         inventory_index = skill_data.get("inventory_index")
@@ -377,7 +404,8 @@ class GameManager:
 
         elif skill_type == "bomb":
             r, c = skill_data.get("row"), skill_data.get("col")
-            if r is None or c is None: return False, "Coordenadas faltantes"
+            if r is None or c is None:
+                return False, "Coordenadas faltantes"
 
             if _is_4p(game.get("mode", "")):
                 active_players = [p for p in PIECES_4P if game.get("username_by_piece", {}).get(p)]
@@ -388,9 +416,12 @@ class GameManager:
 
         elif skill_type == "fix_piece":
             r, c = skill_data.get("row"), skill_data.get("col")
-            if r is None or c is None: return False, "Coordenadas faltantes"
-            if game["board"][r][c] != player: return False, "Esa ficha no es tuya"
-            if [r, c] in game.get("fixed_pieces", []): return False, "La ficha ya es fija"
+            if r is None or c is None:
+                return False, "Coordenadas faltantes"
+            if game["board"][r][c] != player:
+                return False, "Esa ficha no es tuya"
+            if [r, c] in game.get("fixed_pieces", []):
+                return False, "La ficha ya es fija"
             game["fixed_pieces"].append([r, c])
             success, msg = True, "Ficha fijada correctamente"
 
@@ -405,8 +436,10 @@ class GameManager:
 
         elif skill_type == "place_free":
             r, c = skill_data.get("row"), skill_data.get("col")
-            if r is None or c is None: return False, "Coordenadas faltantes"
-            if game["board"][r][c] is not None: return False, "Casilla ocupada"
+            if r is None or c is None:
+                return False, "Coordenadas faltantes"
+            if game["board"][r][c] is not None:
+                return False, "Casilla ocupada"
             game["board"] = apply_free_place(game["board"], r, c, player)
             obtained_skill = self._handle_landing_on_skill_tile(game, player, r, c)
             success = True
@@ -430,7 +463,8 @@ class GameManager:
             if rival:
                 game["skip_next_turn"][rival] = True
                 success, msg = True, f"Turno de {rival} saltado"
-            else: return False, "No hay rival al que saltar"
+            else:
+                return False, "No hay rival al que saltar"
 
         elif skill_type == "lose_turn":
             game["skip_next_turn"][player] = True
@@ -438,22 +472,27 @@ class GameManager:
 
         elif skill_type == "flip_rival":
             r, c = skill_data.get("row"), skill_data.get("col")
-            if r is None or c is None: return False, "Coordenadas faltantes"
-            if game["board"][r][c] is None or game["board"][r][c] == player: return False, "Casilla no valida"
+            if r is None or c is None:
+                return False, "Coordenadas faltantes"
+            if game["board"][r][c] is None or game["board"][r][c] == player:
+                return False, "Casilla no valida"
             game["board"] = apply_flip_rival(game["board"], r, c, player, fixed_set)
             success, msg = True, "Ficha rival volteada"
 
         elif skill_type == "swap_colors":
             target = skill_data.get("target_player")
-            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
+            if not target or target == player or target not in game["skills_inventory"]:
+                return False, "Objetivo no valido"
             game["board"] = swap_player_colors(game["board"], player, target, fixed_set)
             success, msg = True, f"Colores intercambiados con {target}"
 
         elif skill_type == "steal_skill":
             target = skill_data.get("target_player")
-            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
+            if not target or target == player or target not in game["skills_inventory"]:
+                return False, "Objetivo no valido"
             target_inv = game["skills_inventory"][target]
-            if not target_inv: return False, "El rival no tiene habilidades"
+            if not target_inv:
+                return False, "El rival no tiene habilidades"
             skill = target_inv.pop(random.randint(0, len(target_inv)-1))
             game["skills_inventory"][player].append(skill)
             success, msg = True, f"Has robado la habilidad {skill} a {target}"
@@ -461,13 +500,17 @@ class GameManager:
         elif skill_type == "exchange_skill":
             target = skill_data.get("target_player")
             given_index = skill_data.get("given_skill_index")
-            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
-            if len(inventory) < 2: return False, "No tienes otra habilidad para intercambiar"
-            if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a dar no valida"
+            if not target or target == player or target not in game["skills_inventory"]:
+                return False, "Objetivo no valido"
+            if len(inventory) < 2:
+                return False, "No tienes otra habilidad para intercambiar"
+            if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory):
+                return False, "Habilidad a dar no valida"
             
             target_inv = game["skills_inventory"][target]
             
-            if not target_inv: return False, "El rival no tiene habilidades"
+            if not target_inv:
+                return False, "El rival no tiene habilidades"
             
             idx_t = random.randint(0, len(target_inv)-1)
             
@@ -484,9 +527,12 @@ class GameManager:
         elif skill_type == "give_skill":
             target = skill_data.get("target_player")
             given_index = skill_data.get("given_skill_index")
-            if not target or target == player or target not in game["skills_inventory"]: return False, "Objetivo no valido"
-            if len(inventory) < 2: return False, "No tienes otra habilidad para regalar"
-            if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory): return False, "Habilidad a regalar no valida"
+            if not target or target == player or target not in game["skills_inventory"]:
+                return False, "Objetivo no valido"
+            if len(inventory) < 2:
+                return False, "No tienes otra habilidad para regalar"
+            if given_index is None or given_index == inventory_index or given_index < 0 or given_index >= len(inventory):
+                return False, "Habilidad a regalar no valida"
 
             skill_to_gift = inventory[given_index]
             
@@ -514,9 +560,12 @@ class GameManager:
                         if next_p:
                             game["current_player"] = next_p
                             game["valid_moves"] = get_valid_moves_4p(game["board"], next_p, {tuple(p) for p in game.get("fixed_pieces", [])})
-                        else: game["game_over"] = True
-                    else: game["game_over"] = True
-                if game.get("game_over"): await self.save_game_results(game_id)
+                        else:
+                            game["game_over"] = True
+                    else:
+                        game["game_over"] = True
+                if game.get("game_over"):
+                    await self.save_game_results(game_id)
             elif _is_1v1(mode):
                 game["score"] = count_score(game["board"])
                 next_p = "white" if player == "black" else "black"
@@ -537,7 +586,8 @@ class GameManager:
 
     async def surrender_game(self, game_id: str, player: str) -> Tuple[bool, str]:
         game = self.active_games.get(game_id)
-        if not game or game["game_over"]: return False, "No es posible rendirse"
+        if not game or game["game_over"]:
+            return False, "No es posible rendirse"
 
         if _is_4p(game.get("mode", "")):
             username = game.get("username_by_piece", {}).get(player, player)
@@ -552,7 +602,8 @@ class GameManager:
 
     async def abandon_game(self, game_id: str, disconnected_username: str) -> Tuple[bool, str]:
         game = self.active_games.get(game_id)
-        if not game or game["game_over"] or game["status"] != "playing": return False, "Abandono ignorado"
+        if not game or game["game_over"] or game["status"] != "playing":
+            return False, "Abandono ignorado"
 
         mode = game.get("mode")
         paused_usernames = game.get("paused_usernames", [])
@@ -617,7 +668,8 @@ class GameManager:
 
         if _is_4p(mode):
             piece = game.get("piece_by_username", {}).get(disconnected_username)
-            if not piece or piece not in game.get("active_pieces", []): return False, "Jugador inactivo"
+            if not piece or piece not in game.get("active_pieces", []):
+                return False, "Jugador inactivo"
             game["active_pieces"].remove(piece)
             game.setdefault("abandoned_pieces", []).append(piece)
             game.setdefault("final_positions", {})[piece] = 4
@@ -642,9 +694,12 @@ class GameManager:
                     game["valid_moves"] = get_valid_moves_4p(game["board"], next_piece)
             return True, f"{disconnected_username} abandono"
 
-        if game.get("black_player") == disconnected_username: game["winner"] = "white"
-        elif game.get("white_player") == disconnected_username: game["winner"] = "black"
-        else: return False, "Jugador no encontrado"
+        if game.get("black_player") == disconnected_username:
+            game["winner"] = "white"
+        elif game.get("white_player") == disconnected_username:
+            game["winner"] = "black"
+        else:
+            return False, "Jugador no encontrado"
 
         game.get("paused_usernames", [])[:] = [u for u in game.get("paused_usernames", []) if u != disconnected_username]
         self._refresh_paused_state(game)
@@ -671,20 +726,31 @@ class GameManager:
         # Decide winner: respect existing winner (surrender) or compute from score
         winner_color = game.get("winner")
         if not winner_color or winner_color == "IA": # Fallback if not set or vs IA
-            if score["black"] > score["white"]: winner_color = "black"
-            elif score["white"] > score["black"]: winner_color = "white"
-            else: winner_color = "draw"
+            if score["black"] > score["white"]:
+                winner_color = "black"
+            elif score["white"] > score["black"]:
+                winner_color = "white"
+            else:
+                winner_color = "draw"
         
         s_b = f"{score['black']}-{score['white']}"
         s_w = f"{score['white']}-{score['black']}"
 
-        async def get_usr(un): return await database.fetch_one("SELECT id, elo FROM users WHERE username = :un", {"un": un}) if un and un != "IA" else None
+        async def get_usr(un):
+            if un and un != "IA":
+                return await database.fetch_one("SELECT id, elo FROM users WHERE username = :un", {"un": un})
+            return None
         b_usr, w_usr = await get_usr(black_name), await get_usr(white_name)
         
-        b_ch = 30 if winner_color == "black" else (-30 if winner_color == "white" else 0)
-        w_ch = 30 if winner_color == "white" else (-30 if winner_color == "black" else 0)
-        res_b = "Ganada" if winner_color == "black" else ("Perdida" if winner_color == "white" else "Empate")
-        res_w = "Ganada" if winner_color == "white" else ("Perdida" if winner_color == "black" else "Empate")
+        if winner_color == "black":
+            b_ch, w_ch = 30, -30
+            res_b, res_w = "Ganada", "Perdida"
+        elif winner_color == "white":
+            b_ch, w_ch = -30, 30
+            res_b, res_w = "Perdida", "Ganada"
+        else:
+            b_ch, w_ch = 0, 0
+            res_b, res_w = "Empate", "Empate"
 
         async def update_db(usr, ch, res, sc, col, opp):
             if usr:
@@ -728,7 +794,8 @@ class GameManager:
         sorted_scores = sorted(score_groups.keys(), reverse=True)
         
         for s in sorted_scores:
-            if not available_ranks: break
+            if not available_ranks:
+                break
             rank = available_ranks[0] # Todos los empatados reciben este rango
             for p in score_groups[s]:
                 positions[p] = rank
@@ -750,9 +817,11 @@ class GameManager:
         
         for piece in PIECES_4P:
             un = game.get("username_by_piece", {}).get(piece)
-            if not un or piece in invalidated_pieces: continue
+            if not un or piece in invalidated_pieces:
+                continue
             row = await database.fetch_one("SELECT id, elo FROM users WHERE username = :un", {"un": un})
-            if not row: continue
+            if not row:
+                continue
             pos = positions.get(piece, 4)
             delta = rr_map.get(pos, -25)
             opps = ", ".join([p for p in parts if p != un])
@@ -778,7 +847,9 @@ class GameManager:
             )
             if is_ai_game:
                 return
-            if _is_4p(game.get("mode", "")): await self._save_game_results_4p(game)
-            else: await self._save_game_results_1v1(game)
+            if _is_4p(game.get("mode", "")):
+                await self._save_game_results_4p(game)
+            else:
+                await self._save_game_results_1v1(game)
 
 game_manager = GameManager()

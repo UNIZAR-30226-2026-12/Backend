@@ -31,10 +31,14 @@ def apply_gravity(
     ]
 
     # Ordenar: las más cercanas al borde destino se procesan primero
-    if direction == "down":   mobile_pieces.sort(key=lambda x: x['r'], reverse=True)
-    elif direction == "up":   mobile_pieces.sort(key=lambda x: x['r'])
-    elif direction == "right": mobile_pieces.sort(key=lambda x: x['c'], reverse=True)
-    elif direction == "left": mobile_pieces.sort(key=lambda x: x['c'])
+    if direction == "down":
+        mobile_pieces.sort(key=lambda x: x['r'], reverse=True)
+    elif direction == "up":
+        mobile_pieces.sort(key=lambda x: x['r'])
+    elif direction == "right":
+        mobile_pieces.sort(key=lambda x: x['c'], reverse=True)
+    elif direction == "left":
+        mobile_pieces.sort(key=lambda x: x['c'])
 
     # Solo las fichas fijas bloquean el movimiento; los interrogantes NO bloquean
     occupied = set(fixed_pieces)
@@ -79,13 +83,17 @@ def apply_bomb(board: List[List[Optional[str]]], row: int, col: int, player_colo
 
 def swap_player_colors(board: List[List[Optional[str]]], p1: str, p2: str, fixed_pieces: Set[Tuple[int, int]] = None) -> List[List[Optional[str]]]:
     """Intercambia todas las fichas del tablero entre dos jugadores. Las fichas fijas NO cambian de color."""
-    if fixed_pieces is None: fixed_pieces = set()
+    if fixed_pieces is None:
+        fixed_pieces = set()
     size = len(board)
     for r in range(size):
         for c in range(size):
-            if (r, c) in fixed_pieces: continue
-            if board[r][c] == p1: board[r][c] = p2
-            elif board[r][c] == p2: board[r][c] = p1
+            if (r, c) in fixed_pieces:
+                continue
+            if board[r][c] == p1:
+                board[r][c] = p2
+            elif board[r][c] == p2:
+                board[r][c] = p1
     return board
 
 def apply_free_place(board: List[List[Optional[str]]], r: int, c: int, color: str):
