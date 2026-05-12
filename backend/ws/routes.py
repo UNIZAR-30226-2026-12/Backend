@@ -414,7 +414,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                         latest_game.get("black_player") and latest_game.get("black_player") != username
                     )
 
-                    if is_host and not rival_asignado:
+                    if is_host:
                         await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
                         game_manager.remove_game(game_id)
                         await manager.broadcast(game_id, {"type": "error", "payload": {"message": "El host ha abandonado la sala. Partida cancelada."}})
@@ -424,18 +424,30 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, token: str = Qu
                             if p != username:
                                 await notifier.send_invite_response(target_username=p, game_id=game_id, action="room_closed", guest=username)
                     else:
-                        tiene_pieza = (
-                            latest_game.get("black_player") == username or
-                            latest_game.get("white_player") == username or
-                            username in latest_game.get("piece_by_username", {})
-                        )
-                        if username in latest_game.get("participants", []) and not tiene_pieza:
+                        # Si un jugador (que no es el host cerrando sala vacía) abandona la sala de espera:
+                        if username in latest_game.get("participants", []):
                             latest_game["participants"].remove(username)
-                            latest_game.get("players_ready", {}).pop(username, None)
-                            await database.execute(
-                                "DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid",
-                                {"id": int(game_id), "uid": user["id"]}
-                            )
+                        latest_game.get("players_ready", {}).pop(username, None)
+
+                        # Liberar su pieza si la tenía asignada
+                        if latest_game.get("white_player") == username:
+                            latest_game["white_player"] = None
+                        if latest_game.get("black_player") == username:
+                            latest_game["black_player"] = None
+                        if username in latest_game.get("piece_by_username", {}):
+                            del latest_game["piece_by_username"][username]
+
+                        # Eliminar su invitación si la hubiera
+                        await database.execute(
+                            "DELETE FROM lobby_invites WHERE lobby_id = :id AND invited_user_id = :uid",
+                            {"id": int(game_id), "uid": user["id"]}
+                        )
+
+                        # Como ha quedado un hueco libre, nos aseguramos de que la sala vuelva a estar 'waiting'
+                        await database.execute(
+                            "UPDATE lobbies SET status = 'waiting' WHERE id = :id AND status = 'playing'",
+                            {"id": int(game_id)}
+                        )
 
                         await broadcast_room_sync(game_id)
                         parts = latest_game.get("participants", [])

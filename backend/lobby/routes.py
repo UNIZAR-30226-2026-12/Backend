@@ -233,6 +233,7 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
         
         if should_destroy_room:
             await database.execute("DELETE FROM lobbies WHERE id = :id", {"id": int(game_id)})
+            await ws_manager.broadcast(game_id, {"type": "error", "payload": {"message": "El host ha abandonado la sala. Partida cancelada."}})
             game_manager.remove_game(game_id)
             for p in parts_usernames:
                 if p != username:
@@ -244,11 +245,27 @@ async def leave_lobby(game_id: str, current_user: dict = Depends(get_current_use
             
             if username in game.get("participants", []):
                 game["participants"].remove(username)
-                game.get("players_ready", {}).pop(username, None)
+            game.get("players_ready", {}).pop(username, None)
+            
+            # Liberar la pieza que tenía asignada
+            if game.get("white_player") == username:
+                game["white_player"] = None
+            if game.get("black_player") == username:
+                game["black_player"] = None
+            if username in game.get("piece_by_username", {}):
+                del game["piece_by_username"][username]
+
+            # Como ha quedado un hueco libre, nos aseguramos de que la sala vuelva a estar 'waiting'
+            await database.execute(
+                "UPDATE lobbies SET status = 'waiting' WHERE id = :id AND status = 'playing'",
+                {"id": int(game_id)}
+            )
             
             creator_name = await database.fetch_val("SELECT username FROM users WHERE id = :uid", {"uid": lobby["creator_id"]})
             if creator_name:
                 await notifier.send_invite_response(target_username=creator_name, game_id=game_id, action="left", guest=username)
+            
+            # Usar broadcast_room_sync u broadcast_game_state para notificar a la sala
             await ws_manager.broadcast_game_state(game_id, game)
             return {"status": "success", "message": "Has abandonado la sala"}
 
