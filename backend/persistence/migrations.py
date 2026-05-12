@@ -27,27 +27,4 @@ async def run_migrations():
         ON friend_messages (receiver_id, is_read)
     """)
 
-    # --- lobby_invites ---
-    await database.execute("""
-        CREATE TABLE IF NOT EXISTS lobby_invites (
-            id SERIAL PRIMARY KEY,
-            lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
-            invited_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            invited_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            invite_order INTEGER NOT NULL DEFAULT 0,
-            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(lobby_id, invited_id)
-        )
-    """)
-
-    await database.execute("""
-        UPDATE lobby_invites
-        SET invited_user_id = invited_id
-        WHERE invited_user_id IS NULL AND invited_id IS NOT NULL
-    """)
-    await database.execute("""
-        UPDATE lobby_invites
-        SET invited_id = invited_user_id
-        WHERE invited_id IS NULL AND invited_user_id IS NOT NULL
-    """)
+    # NOTE: La tabla lobby_invites ya existe en Supabase, no es necesario crearla aquí
