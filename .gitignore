@@ -26,6 +26,7 @@ backend/__pycache__/
 backend/*.pyc
 backend/.requirements_hash    # hash local para dependencias Python
 backend/.env
+.env
 
 # =========================
 # Node hash
