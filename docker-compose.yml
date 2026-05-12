@@ -8,7 +8,10 @@ services:
     container_name: reversi_backend
     restart: always
     environment:
-      DATABASE_URL: postgresql://postgres.wgxytzbccgerwfuovdaw:zcGEJSs8RK9sd@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require
+      DATABASE_URL: ${DATABASE_URL}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USER: ${SMTP_USER}
+      SECRET_KEY: ${SECRET_KEY}
     # No exponemos puertos directamente al exterior; Nginx hará de proxy
     ports:
       - "8081:8000"
