@@ -7,7 +7,6 @@
   - [🔐 Auth](#auth-apiauth)
   - [👤 Users & Avatar](#users--avatar-apiusers)
   - [🤝 Friends](#friends-apifriends)
-  - [⚡ Skills](#-skills-apiskills)
   - [🎮 Games & Lobby](#games--lobby-apigames)
   - [🏆 Ranking](#ranking-apiranking)
 - [⚡ WebSockets](#websockets)
@@ -527,36 +526,6 @@ El campo `status` de cada amigo se calcula en backend usando la conexión activa
   ]
 }
 ```
-
----
-
-### ⚡ SKILLS (`/api/skills`)
-
-#### 🟢 GET `/api/skills`
-**Obtiene la lista oficial de las 12 habilidades disponibles en el juego.**
-
-**Respuesta (200):**
-```json
-{
-  "skills": [
-    "gravity",
-    "bomb",
-    "fix_piece",
-    "unfix_piece",
-    "place_free",
-    "skip_rival",
-    "lose_turn",
-    "flip_rival",
-    "swap_colors",
-    "steal_skill",
-    "exchange_skill",
-    "give_skill"
-  ]
-}
-```
-
-> [!NOTE]
-> Para documentación detallada de cada habilidad, sus efectos, restricciones y limitaciones, consulta [backend/skills/info.md](./backend/skills/info.md).
 
 ---
 

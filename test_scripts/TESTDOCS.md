@@ -1,5 +1,23 @@
 # Documentación de Tests
 
+## 🔐 `test_password_recovery.py`
+*Flujo de recuperación de contraseña por correo.*
+
+* **Bloque 1: Solicitud de recuperación (`forgot-password`):** Verifica que el endpoint responda correctamente y no filtre existencia/no existencia del email.
+* **Bloque 2: Integridad del cambio de credencial:** Comprueba que la contraseña previa queda invalidada y que la nueva credencial emitida por el backend permite autenticación posterior.
+* **Bloque 3: Robustez ante errores de envío SMTP:** Valida el comportamiento del sistema cuando falla el correo, asegurando consistencia del estado de credenciales en backend.
+
+## 🧠 `test_ai_skills.py`
+*Heurísticas de uso de habilidades por la IA (Capa 1).* 
+
+* **Bloque A: Gravity posicional:** Valida que `gravity` seleccione la dirección con mayor ganancia según pesos del tablero.
+* **Bloque B: Umbral de bomba:** Comprueba que `bomb` solo se use cuando hay al menos 2 fichas rivales en radio 3x3.
+* **Bloque C: Selección por peso (`fix_piece` / `place_free`):** Verifica preferencia por casillas de mayor valor posicional.
+* **Bloque D: Objetivo de `flip_rival`:** Asegura que la IA voltee la ficha rival de mayor peso posicional.
+* **Bloque E: Condición de `swap_colors`:** Confirma que solo se active cuando la IA va perdiendo.
+* **Bloque F: Decisiones de robo/intercambio:** Valida la selección inteligente de objetivo para `steal_skill` y `exchange_skill`.
+* **Bloque G: Mistake rate:** Comprueba estadísticamente la tasa de fallo esperada (~15%) y su excepción con inventario vacío.
+
 ## 👤 `test_user_social.py`
 *Gestión de identidad, perfil y relaciones sociales.*
 
