@@ -16,7 +16,6 @@ from persistence.migrations import run_migrations
 from ranking.routes import router as ranking_router
 from users.routes import router as users_router
 from ws.routes import router as ws_router
-from skills.routes import router as skills_router
 
 """
 Endpoints del Backend ---> mirar en APIDOCS.md
@@ -57,7 +56,6 @@ app.include_router(friends_router, prefix="/api/friends", tags=["Friends"])
 app.include_router(lobby_router, prefix="/api/games", tags=["Games/Lobby"])
 app.include_router(ranking_router, prefix="/api/ranking", tags=["Ranking"]) 
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
-app.include_router(skills_router, prefix="/api/skills", tags=["Skills"])
 app.include_router(ws_router, prefix="/ws", tags=["WebSockets"])
 
 # --- Eventos de Base de Datos ---
