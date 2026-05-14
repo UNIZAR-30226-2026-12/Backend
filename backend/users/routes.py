@@ -18,6 +18,8 @@ router = APIRouter()
 
 def _normalize_mode(mode: str) -> str:
     normalized = (mode or "").strip().lower()
+    if normalized.endswith("_skills"):
+        normalized = normalized[:-7]
     if normalized in {"1vs1", "1v1"}:
         return "1vs1"
     if normalized in {"1vs1vs1vs1", "1v1v1v1"}:
